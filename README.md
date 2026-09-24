@@ -45,6 +45,21 @@ npm install
 npm run dev
 ```
 
+The current prototype includes the seeker mission dashboard, QR scanner, Programmer case flow, and a team console with Surveillance and Hider Matrix modes.
+
+### Native Mobile Client (`openverse-native`)
+
+The installable app is a real Expo/React Native client with native QR camera access, Android/iOS background location support, and offline on-device storage. It does not use Firebase, localhost, or another backend.
+
+```bash
+cd openverse-native
+npm install
+npm run typecheck
+npm run build:apk
+```
+
+Background tracking must be tested in a development or release build; Android background services are unavailable in Expo Go.
+
 ### Web Command Portal (`openverse-web`)
 
 ```bash
@@ -52,6 +67,8 @@ cd openverse-web
 npm install
 npm run dev
 ```
+
+The web command portal is scaffolded in `openverse-web`; its first implementation pass is still pending dependency installation.
 
 ---
 

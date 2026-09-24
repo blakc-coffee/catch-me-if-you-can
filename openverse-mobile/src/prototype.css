@@ -83,6 +83,22 @@
   z-index: 1;
 }
 
+.mission-shell::before { inset: -64px 8% auto; height: 164px; background: rgba(112, 137, 201, 0.2); filter: blur(0); opacity: 0.9; }
+.mission-header { position: absolute; top: 46px; left: 22px; right: 22px; z-index: 5; height: 42px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--ov-edge); color: #b7c5da; font-size: 10px; letter-spacing: 0.04em; }
+.mission-header span { color: #dceaff; }.mission-header i { color: #738096; font-style: normal; }.mission-header small { color: #9da7ba; font-size: 9px; }
+.mission-content { padding-top: 112px; }
+.mission-hero h1 { margin: 0 0 7px; font: 500 29px/1.12 Space Grotesk, sans-serif; letter-spacing: -0.04em; color: var(--ov-text); }
+.mission-hero p { margin: 0; color: #9da7ba; font-size: 13px; }
+.mission-status-card, .mission-objective-card { border-radius: 16px; background: var(--ov-panel); box-shadow: inset 0 1px rgba(216,236,248,.12), inset 0 0 0 1px rgba(186,215,247,.06); }
+.mission-status-card { margin-top: 23px; padding: 17px 16px 14px; }
+.mission-live { color: #9ac9f9; font-size: 10px; letter-spacing: .04em; }.mission-live i { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: #9ac9f9; }
+.mission-status-card > strong { display: block; margin-top: 15px; font: 500 34px/1 Space Grotesk, sans-serif; letter-spacing: -.04em; }.mission-status-card > span { display: block; margin-top: 5px; color: #bac4d6; font-size: 12px; }
+.mission-divider { height: 1px; margin: 12px 0 9px; background: var(--ov-edge); }.mission-meta { display: flex; gap: 15px; color: #9da7ba; }.mission-meta small { font-size: 9px; }
+.mission-section-label { margin-top: 35px; color: #a7b3c7; font-size: 10px; }
+.mission-objective-card { margin-top: 10px; padding: 18px 16px 20px; }.objective-kicker { color: #a6cff8; font-size: 10px; letter-spacing: .05em; }.objective-kicker i { margin: 0 8px; color: #7989a3; font-style: normal; }.mission-objective-card h2 { margin: 12px 0 6px; font: 500 20px/1.15 Space Grotesk, sans-serif; }.mission-objective-card p { margin: 0; color: #9da7ba; font-size: 12px; }
+.mission-open-button { width: 100%; min-height: 47px; margin-top: 29px; display: flex; align-items: center; justify-content: center; gap: 12px; border: 0; border-radius: 999px; color: #f2f6ff; background: #171d2c; box-shadow: inset 0 1px rgba(216,236,248,.06); font-size: 13px; }.mission-open-button svg { width: 14px; margin-left: 3px; }
+.position-sharing { margin-top: 34px; }.position-sharing div { color: #a7b3c7; font-size: 10px; }.position-sharing p { margin: 10px 0 0; color: #cad6e8; font-size: 12px; }
+
 .case-content { padding-bottom: calc(var(--mobile-safe-area-height) + 112px); }
 
 .hero-copy { margin-bottom: 22px; }
@@ -248,6 +264,28 @@
 .success-panel > span { display: block; margin-top: 14px; color: var(--ov-success); font-size: 9px; letter-spacing: 0.16em; }
 .success-panel h2 { margin: 8px 0 6px; font: 500 26px Space Grotesk, sans-serif; }
 .success-panel p { margin: 0 auto 20px; max-width: 250px; color: var(--ov-muted); font-size: 12px; line-height: 1.5; }
+
+.team-content { padding-top: 126px; padding-bottom: calc(var(--mobile-safe-area-height) + 42px); }
+.intel-context { height: 0; margin: -24px 0 24px; color: var(--ov-muted); font-size: 11px; line-height: 1; overflow: visible; }
+.console-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; margin-bottom: 14px; border-radius: 12px; background: rgba(186, 214, 247, 0.05); box-shadow: inset 0 0 0 1px var(--ov-edge); }
+.console-tabs button, .filter-row button { min-height: 32px; border: 0; border-radius: 8px; color: var(--ov-muted); background: transparent; font-size: 8px; letter-spacing: 0.1em; }
+.console-tabs button.active, .filter-row button.active { color: var(--ov-text); background: rgba(186, 214, 247, 0.12); box-shadow: inset 0 0 0 1px var(--ov-edge); }
+.radar-card { padding: 13px; }
+.radar-grid { height: 250px; position: relative; overflow: hidden; border-radius: 12px; background-color: #0a101c; background-image: linear-gradient(rgba(186, 215, 247, 0.07) 1px, transparent 1px), linear-gradient(90deg, rgba(186, 215, 247, 0.07) 1px, transparent 1px); background-size: 42px 42px; }
+.radar-grid::after { content: ""; position: absolute; inset: 0; background: rgba(25, 61, 89, 0.18); pointer-events: none; }
+.radar-ring { position: absolute; left: 50%; top: 50%; border: 1px solid rgba(182, 217, 252, 0.18); border-radius: 999px; transform: translate(-50%, -50%); }
+.ring-one { width: 118px; height: 118px; }.ring-two { width: 202px; height: 202px; }
+.radar-sweep { position: absolute; left: 50%; top: 50%; width: 110px; height: 1px; transform-origin: left center; background: #7be0bd; box-shadow: 0 0 14px #7be0bd; animation: sweep 4s linear infinite; }
+@keyframes sweep { to { transform: rotate(360deg); } }
+.map-marker { position: absolute; z-index: 1; padding: 5px 6px; border-radius: 6px; color: var(--ov-text); background: rgba(102, 58, 243, 0.84); box-shadow: 0 0 18px rgba(102, 58, 243, 0.5); font: normal 8px Inter, sans-serif; }
+.marker-one { left: 23%; top: 27%; }.marker-two { right: 18%; top: 38%; }.marker-three { left: 53%; bottom: 19%; }
+.radar-caption { display: flex; justify-content: space-between; margin-top: 10px; color: var(--ov-success); font-size: 8px; letter-spacing: 0.08em; }.radar-caption small { color: var(--ov-muted); font-size: 7px; }
+.status-dot { display: inline-block; width: 6px; height: 6px; border-radius: 99px; background: var(--ov-success); box-shadow: 0 0 8px var(--ov-success); }
+.team-stats-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 12px 0; }.mini-stat { padding: 14px; }.mini-stat span, .mini-stat small { display: block; color: var(--ov-muted); font-size: 8px; letter-spacing: 0.1em; }.mini-stat strong { display: block; margin: 7px 0 3px; font: 500 22px Space Grotesk, sans-serif; }.mini-stat small { letter-spacing: 0; font-size: 9px; }
+.seeker-list { padding: 15px 16px; margin-bottom: 14px; }.seeker-line { display: grid; grid-template-columns: 10px 1fr auto; gap: 9px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--ov-edge); }.seeker-line:last-child { border: 0; }.seeker-line strong, .seeker-line small { display: block; }.seeker-line strong { font-size: 11px; }.seeker-line small { margin-top: 3px; color: var(--ov-muted); font-size: 9px; }.seeker-line b { color: var(--ov-body); font-size: 9px; font-weight: 500; }.seeker-line.dim { opacity: 0.62; }
+.token-banner { display: flex; align-items: center; justify-content: space-between; padding: 15px 17px; margin-bottom: 12px; }.token-banner span:first-child { display: block; color: var(--ov-muted); font-size: 8px; letter-spacing: 0.1em; }.token-banner strong { display: block; margin-top: 5px; font: 500 25px Space Grotesk, sans-serif; }.token-banner .live-chip { font-size: 7px; }
+.filter-row { display: flex; gap: 6px; margin-bottom: 12px; }.filter-row button { padding: 0 9px; box-shadow: inset 0 0 0 1px var(--ov-edge); }
+.challenge-list { display: grid; gap: 10px; }.challenge-card { padding: 16px; }.challenge-card.solved { box-shadow: inset 0 0 0 1px rgba(123, 224, 189, 0.3), 0 18px 42px rgba(0, 0, 0, 0.25); }.challenge-card.locked { opacity: 0.62; }.challenge-meta { display: flex; justify-content: space-between; color: #b9cae5; font-size: 8px; letter-spacing: 0.11em; }.challenge-meta small { color: var(--ov-muted); font-size: 8px; }.challenge-card h2 { margin: 11px 0 6px; font: 500 17px Space Grotesk, sans-serif; }.challenge-card p { margin: 0 0 14px; color: var(--ov-muted); font-size: 11px; line-height: 1.45; }.challenge-card button { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 38px; padding: 0 12px; border: 0; border-radius: 999px; color: var(--ov-body); background: rgba(186, 214, 247, 0.08); font-size: 10px; }.challenge-card button svg { margin-left: auto; }.challenge-card button:disabled { color: var(--ov-success); opacity: 1; }
 
 button { cursor: pointer; -webkit-tap-highlight-color: transparent; }
 button:focus-visible { outline: 2px solid #b6d9fc; outline-offset: 2px; }

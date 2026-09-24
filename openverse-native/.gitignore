@@ -1,0 +1,13 @@
+node_modules/
+.npm-cache/
+.expo/
+dist/
+dist-web-preview/
+android/
+ios/
+*.jks
+*.keystore
+*.p8
+*.p12
+*.mobileprovision
+*.apk
