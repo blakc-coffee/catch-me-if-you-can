@@ -1,7 +1,7 @@
 import type { DocumentReference, Firestore, Transaction } from "firebase-admin/firestore";
 import type { CallableRequest } from "firebase-functions/v2/https";
 import { COL, GAME_DOC, type GameDoc, type TeamDoc, type UserDoc } from "../models.js";
-import type { Role } from "../shared/contract.js";
+import { ROLES, type Role } from "../shared/contract.js";
 import { sha256Hex } from "./crypto.js";
 import { fail } from "./errors.js";
 
@@ -9,18 +9,30 @@ import { fail } from "./errors.js";
 export interface CallContext {
   uid: string;
   email: string | null;
+  emailVerified: boolean;
   signInProvider: string | null;
+}
+
+const INSTITUTIONAL_DOMAIN = "iiitkottayam.ac.in";
+
+export function isInstitutionalEmail(email: string | null): boolean {
+  return email?.trim().toLowerCase().endsWith(`@${INSTITUTIONAL_DOMAIN}`) ?? false;
 }
 
 export function contextFromRequest(request: CallableRequest<unknown>): CallContext {
   const a = request.auth;
   if (!a?.uid) fail("unauthenticated", "UNAUTHENTICATED", "Sign in required.");
-  const token = a.token as { email?: string; firebase?: { sign_in_provider?: string } };
-  return {
+  const token = a.token as { email?: string; email_verified?: boolean; firebase?: { sign_in_provider?: string } };
+  const context = {
     uid: a.uid,
     email: token.email ?? null,
+    emailVerified: token.email_verified === true,
     signInProvider: token.firebase?.sign_in_provider ?? null,
   };
+  if (!context.emailVerified || !isInstitutionalEmail(context.email)) {
+    fail("permission-denied", "INSTITUTIONAL_EMAIL_REQUIRED", "Use a verified @iiitkottayam.ac.in account.");
+  }
+  return context;
 }
 
 type Reader = Firestore | Transaction;
@@ -43,10 +55,12 @@ export function makePlayerId(uid: string): string {
 
 /** Fills server-owned fields that pre-existing user docs may not have yet. */
 export function withUserDefaults(uid: string, data: Partial<UserDoc>): UserDoc {
+  const role = (ROLES as readonly unknown[]).includes(data.role) ? (data.role as Role) : "seeker";
   return {
     ...(data as UserDoc),
     name: data.name ?? "",
     email: data.email ?? null,
+    role,
     teamId: data.teamId ?? null,
     playerId: data.playerId ?? makePlayerId(uid),
     status: data.status ?? "active",

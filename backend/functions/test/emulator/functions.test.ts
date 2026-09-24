@@ -32,7 +32,7 @@ describe("compatibility with existing seekerdb documents", () => {
     const now = Timestamp.now();
     await db().doc(`users/${rec.uid}`).set({ name: "Seeker One", email: "seeker1@example.com", role: "seeker", teamId: "alpha", createdAt: now, updatedAt: now });
 
-    const res = await createOrSyncProfile({ uid: rec.uid, email: "seeker1@example.com", signInProvider: "password" }, {});
+    const res = await createOrSyncProfile({ uid: rec.uid, email: "seeker1@example.com", emailVerified: true, signInProvider: "password" }, {});
     expect(res.profile).toMatchObject({ name: "Seeker One", role: "seeker", teamId: "alpha", status: "active", score: 0, eliminationTokens: 0 });
     expect(res.claimsUpdated).toBe(true);
     expect((await auth().getUser(rec.uid)).customClaims).toEqual({ role: "seeker", teamId: "alpha" });
@@ -59,7 +59,7 @@ describe("compatibility with existing seekerdb documents", () => {
   it("treats an unknown role string as seeker, never more", async () => {
     const rec = await auth().createUser({ email: "odd@example.com" });
     await db().doc(`users/${rec.uid}`).set({ name: "Odd", email: "odd@example.com", role: "superuser", teamId: null });
-    const res = await createOrSyncProfile({ uid: rec.uid, email: "odd@example.com", signInProvider: "password" }, {});
+    const res = await createOrSyncProfile({ uid: rec.uid, email: "odd@example.com", emailVerified: true, signInProvider: "password" }, {});
     expect(res.profile.role).toBe("seeker");
     expect((await auth().getUser(rec.uid)).customClaims).toMatchObject({ role: "seeker" });
   });
@@ -68,7 +68,7 @@ describe("compatibility with existing seekerdb documents", () => {
 describe("profiles, roles and teams", () => {
   it("new sign-ups become team-less seekers with server-owned fields", async () => {
     const rec = await auth().createUser({ email: "new@test.dev" });
-    const ctx = { uid: rec.uid, email: "new@test.dev", signInProvider: "password" };
+    const ctx = { uid: rec.uid, email: "new@test.dev", emailVerified: true, signInProvider: "password" };
     const r = await createOrSyncProfile(ctx, { name: "Nova" });
     expect(r.profile).toMatchObject({ role: "seeker", teamId: null, score: 0, eliminationTokens: 0, status: "active", name: "Nova" });
     expect((await auth().getUser(rec.uid)).customClaims).toEqual({ role: "seeker", teamId: null });

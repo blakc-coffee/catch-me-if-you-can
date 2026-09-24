@@ -47,7 +47,7 @@ beforeEach(async () => {
   const d = db();
   const w = d.batch();
   const user = (uid: string, role: Role, teamId: string | null) =>
-    w.set(d.doc(`users/${uid}`), { name: uid, email: `${uid}@example.com`, role, teamId, score: 0, eliminationTokens: 0, status: "active", playerId: `OP-${uid}` });
+    w.set(d.doc(`users/${uid}`), { name: uid, email: `${uid}@iiitkottayam.ac.in`, role, teamId, score: 0, eliminationTokens: 0, status: "active", playerId: `OP-${uid}` });
   user("s1", "seeker", ALPHA);
   user("s2", "seeker", BRAVO);
   user("h1", "hider", GHOST);
@@ -81,7 +81,12 @@ beforeEach(async () => {
 const TEAM: Record<string, string | null> = { s1: ALPHA, s2: BRAVO, h1: GHOST, surv: null, adm: null };
 
 function as(uid: string, role: Role, teamId: string | null = TEAM[uid] ?? null): Firestore {
-  return env.authenticatedContext(uid, { role, teamId }).firestore() as unknown as Firestore;
+  return env.authenticatedContext(uid, {
+    email: `${uid}@iiitkottayam.ac.in`,
+    email_verified: true,
+    role,
+    teamId,
+  }).firestore() as unknown as Firestore;
 }
 function anon(): Firestore {
   return env.unauthenticatedContext().firestore() as unknown as Firestore;
@@ -94,6 +99,20 @@ describe("unauthenticated users", () => {
       await assertFails(getDoc(doc(f, p)));
     }
     await assertFails(setDoc(doc(f, "users/x"), { role: "admin" }));
+  });
+});
+
+describe("identity enforcement", () => {
+  it("rejects unverified and non-institutional accounts", async () => {
+    const unverified = env.authenticatedContext("s1", { email: "s1@iiitkottayam.ac.in", email_verified: false }).firestore();
+    const external = env.authenticatedContext("s1", { email: "s1@gmail.com", email_verified: true }).firestore();
+    await assertFails(getDoc(doc(unverified, "game/state")));
+    await assertFails(getDoc(doc(external, "game/state")));
+  });
+
+  it("uses the users document instead of forged role and team claims", async () => {
+    await assertFails(getDoc(doc(as("s1", "admin"), "puzzles/p1")));
+    await assertSucceeds(getDoc(doc(as("adm", "seeker", ALPHA), "puzzles/p1")));
   });
 });
 
@@ -146,7 +165,7 @@ describe("existing content collections", () => {
   it("artifact (QR) records are hidden from seekers and writable only by admins", async () => {
     await assertFails(getDoc(doc(as("s1", "seeker"), "artifacts/QR-KEY-001")));
     await assertFails(getDocs(collection(as("s1", "seeker"), "artifacts")));
-    await assertSucceeds(getDoc(doc(as("h1", "hider"), "artifacts/QR-KEY-001")));
+    await assertFails(getDoc(doc(as("h1", "hider"), "artifacts/QR-KEY-001")));
     await assertSucceeds(getDoc(doc(as("surv", "surveillance"), "artifacts/QR-KEY-001")));
     await assertFails(setDoc(doc(as("h1", "hider"), "artifacts/QR-NEW"), { qrType: "correct" }));
     await assertSucceeds(setDoc(doc(as("adm", "admin"), "artifacts/QR-NEW"), { qrCode: "QR-NEW", qrType: "wrong", isActive: true }));

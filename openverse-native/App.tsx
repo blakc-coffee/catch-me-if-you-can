@@ -13,8 +13,12 @@ import { isTracking } from "./src/services/locationService";
 import { loadGameState, saveGameState } from "./src/services/storage";
 import { colors } from "./src/theme";
 import type { AppRoute, GameState } from "./src/types";
+import { createOrSyncProfile } from "./src/services/firebase/callables";
+import { configureFirebase } from "./src/services/firebase/config";
 
 const initialState: GameState = { claimedArtifactIds: [], lastScannedPayload: null };
+
+configureFirebase();
 
 export default function App() {
   const [route, setRoute] = useState<AppRoute>("mission");
@@ -30,8 +34,17 @@ export default function App() {
       return;
     }
 
-    const unsubscribe = onAuthStateChanged(getAuth(), (nextUser) => {
+    const unsubscribe = onAuthStateChanged(getAuth(), async (nextUser) => {
       setUser(nextUser);
+      if (nextUser) {
+        try {
+          await createOrSyncProfile({ name: nextUser.displayName ?? undefined });
+        } catch (error) {
+          console.error("Unable to sync Firebase profile", error);
+          await getAuth().signOut();
+          setUser(null);
+        }
+      }
       setAuthReady(true);
     });
 

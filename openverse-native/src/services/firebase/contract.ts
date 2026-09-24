@@ -1,3 +1,6 @@
+// GENERATED — copy of backend/functions/src/shared/contract.ts. Do not edit here;
+// run `npm run sync:contract` in backend/ after changing the backend contract.
+
 /**
  * Client ↔ server contract for the OpenVerse callable functions.
  *

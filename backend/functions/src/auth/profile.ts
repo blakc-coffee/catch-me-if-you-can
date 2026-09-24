@@ -96,6 +96,8 @@ export async function createOrSyncProfile(ctx: CallContext, raw: unknown): Promi
       if (existing[key] === undefined) patch[key] = filled[key];
     }
     if (existing.teamId === undefined) patch.teamId = null;
+    if (!(ROLES as readonly unknown[]).includes(existing.role)) patch.role = filled.role;
+    if (existing.email !== ctx.email) patch.email = ctx.email;
     if (input.name && input.name !== existing.name) {
       patch.name = input.name;
       patch.updatedAt = now;

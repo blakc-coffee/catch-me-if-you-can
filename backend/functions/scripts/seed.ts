@@ -51,16 +51,18 @@ writeFileSync(outFile, csv.join("\n") + "\n");
 console.log(`Seeded game on ${args.production ? projectId : `emulator (${projectId})`}.`);
 console.log(`QR codes (${artifacts.length}) → ${path.relative(process.cwd(), outFile)}`);
 const teams = data.teams as { name: string; joinCode?: string }[];
-console.log(`Team codes: ${teams.filter((t) => t.joinCode).map((t) => `${t.name}=${t.joinCode}`).join(", ")}`);
+if (!args.production) {
+  console.log(`Team codes: ${teams.filter((t) => t.joinCode).map((t) => `${t.name}=${t.joinCode}`).join(", ")}`);
+}
 
 if (!args.production) {
   const DEV_PASSWORD = "openverse-dev";
   const devUsers = [
-    { email: "admin@openverse.dev", role: "admin", name: "HQ Admin", teamId: null },
-    { email: "surveillance@openverse.dev", role: "surveillance", name: "Overwatch", teamId: null },
-    { email: "hider1@openverse.dev", role: "hider", name: "Ghost One", teamId: "ghost" },
-    { email: "seeker1@openverse.dev", role: "seeker", name: "Echo Agent", teamId: "alpha" },
-    { email: "seeker2@openverse.dev", role: "seeker", name: "Falcon", teamId: "bravo" },
+    { email: "admin@iiitkottayam.ac.in", role: "admin", name: "HQ Admin", teamId: null },
+    { email: "surveillance@iiitkottayam.ac.in", role: "surveillance", name: "Overwatch", teamId: null },
+    { email: "hider1@iiitkottayam.ac.in", role: "hider", name: "Ghost One", teamId: "ghost" },
+    { email: "seeker1@iiitkottayam.ac.in", role: "seeker", name: "Echo Agent", teamId: "alpha" },
+    { email: "seeker2@iiitkottayam.ac.in", role: "seeker", name: "Falcon", teamId: "bravo" },
   ] as const;
   const auth = getAuth();
   for (const u of devUsers) {

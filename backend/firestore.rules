@@ -15,7 +15,9 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     function signedIn() {
-      return request.auth != null;
+      return request.auth != null
+        && request.auth.token.get('email_verified', false) == true
+        && request.auth.token.get('email', '').matches('.*@iiitkottayam\\.ac\\.in$');
     }
 
     function isSelf(uid) {
@@ -23,11 +25,15 @@ service cloud.firestore {
     }
 
     function role() {
-      return request.auth.token.get('role', '');
+      return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '')
+        : '';
     }
 
     function myTeam() {
-      return request.auth.token.get('teamId', null);
+      return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('teamId', null)
+        : null;
     }
 
     function hasRole(roles) {
@@ -80,7 +86,7 @@ service cloud.firestore {
     }
 
     match /artifacts/{qrCode} {
-      allow read: if hasRole(['admin', 'surveillance', 'hider']);
+      allow read: if hasRole(['admin', 'surveillance']);
       allow write: if isAdmin();
     }
 

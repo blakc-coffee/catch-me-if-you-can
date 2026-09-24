@@ -39,9 +39,9 @@ let counter = 0;
  */
 export async function makeUser(role: Role, teamId: string | null = null, name?: string): Promise<CallContext> {
   counter += 1;
-  const email = `${role}${counter}-${Date.now()}@test.dev`;
-  const record = await auth().createUser({ email, password: "password123" });
-  const ctx: CallContext = { uid: record.uid, email, signInProvider: "password" };
+  const email = `${role}${counter}-${Date.now()}@iiitkottayam.ac.in`;
+  const record = await auth().createUser({ email, password: "password123", emailVerified: true });
+  const ctx: CallContext = { uid: record.uid, email, emailVerified: true, signInProvider: "password" };
   await createOrSyncProfile(ctx, { name: name ?? `${role} ${counter}` });
   if (role !== "seeker" || teamId) {
     await db().collection("users").doc(record.uid).update({ role, teamId });

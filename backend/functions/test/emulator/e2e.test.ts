@@ -8,7 +8,7 @@ import { connectAuthEmulator, createUserWithEmailAndPassword, getAuth, signOut, 
 import { connectFirestoreEmulator, doc, getDoc, getFirestore } from "firebase/firestore";
 import { connectFunctionsEmulator, getFunctions, httpsCallable, type Functions, type FunctionsError } from "firebase/functions";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { db as adminDb } from "../../src/lib/firebase.js";
+import { auth as adminAuth, db as adminDb } from "../../src/lib/firebase.js";
 import { CALLABLES, FUNCTIONS_REGION, type ErrorReason } from "../../src/shared/contract.js";
 import type { SeededArtifact } from "../../scripts/seedGame.js";
 import { CODES, PROJECT_ID, onCampus, resetEmulators, seed } from "./helpers.js";
@@ -56,7 +56,9 @@ describe("callable endpoints", () => {
   });
 
   it("runs the seeker flow: profile → join team → telemetry → scan → solve", async () => {
-    const { user } = await createUserWithEmailAndPassword(clientAuth, "e2e-seeker@test.dev", "password123");
+    const { user } = await createUserWithEmailAndPassword(clientAuth, "e2e-seeker@iiitkottayam.ac.in", "password123");
+    await adminAuth().updateUser(user.uid, { emailVerified: true });
+    await user.getIdToken(true);
 
     const profile = await call<{ name: string }, { profile: { role: string; teamId: string | null }; claimsUpdated: boolean }>("createOrSyncProfile")({ name: "E2E" });
     expect(profile.data).toMatchObject({ profile: { role: "seeker", teamId: null }, claimsUpdated: true });
@@ -86,7 +88,9 @@ describe("callable endpoints", () => {
   });
 
   it("surfaces validation and size errors with typed reasons", async () => {
-    await createUserWithEmailAndPassword(clientAuth, "e2e-v@test.dev", "password123");
+    const { user } = await createUserWithEmailAndPassword(clientAuth, "e2e-v@iiitkottayam.ac.in", "password123");
+    await adminAuth().updateUser(user.uid, { emailVerified: true });
+    await user.getIdToken(true);
     await call("createOrSyncProfile")({});
     await expectCallReason(call("createOrSyncProfile")({ role: "admin" }), "INVALID_ARGUMENT");
     await expectCallReason(call("joinTeam")({ joinCode: "x".repeat(20_000) }), "PAYLOAD_TOO_LARGE");

@@ -48,7 +48,7 @@ backend/
 |---|---|---|---|
 | `users/{uid}` | `name`, `email`, `role`, `teamId`, `createdAt`, `updatedAt` | `playerId`, `status`, `score`, `eliminationTokens`, `lastSeenAt` | read: owner, surveillance, admin · update: owner/admin may change **only `name`** |
 | `teams/{teamId}` | `name`, `type` (`seeker`\|`hider`), `createdAt` | `score`, `tokens`, `artifactsClaimed`, `puzzlesSolved` | read: signed-in · write: admin (**not** the counters) |
-| `artifacts/{qrCode}` | `qrCode`, `qrType` (`correct`\|`wrong`), `name`, `description`, `areaId`, `puzzleId`, `redirectUrl`, `isActive`, `createdAt` | optional `points` (default 25) | read: admin, surveillance, hider · write: admin |
+| `artifacts/{qrCode}` | `qrCode`, `qrType` (`correct`\|`wrong`), `name`, `description`, `areaId`, `puzzleId`, `redirectUrl`, `isActive`, `createdAt` | optional `points` (default 25) | read: admin, surveillance · write: admin |
 | `puzzles/{id}` | `title`, `question`, `answer`, `createdAt` | optional `points` (100), `tokensAwarded` (1), `hints`, `audience` (default `["seeker"]`) | **admin only** (it holds answers) |
 | `areas/{id}` | `name`, `description`, `createdAt` | — | read: signed-in · write: admin |
 
@@ -70,7 +70,8 @@ Roles are lower-case: `seeker`, `hider`, `surveillance`, `admin`. An `answer` ma
 
 ### Roles, teams and claims
 
-- **`users/{uid}` is the authority for `role` and `teamId`.** Functions mirror both into custom claims (`{role, teamId}`), and the security rules read those claims. That's cheap and can't be forged.
+- **`users/{uid}` is the authority for `role` and `teamId`.** Functions and security rules read this document, so revoked privileges take effect without waiting for an ID-token refresh. Claims are retained as a client convenience only.
+- Every account must have a verified `@iiitkottayam.ac.in` email. The callable boundary and Firestore rules enforce the same policy.
 - **Functions re-read the users doc on every call.** A change takes effect immediately, not when the client's token refreshes.
 - **`createOrSyncProfile` keeps claims in sync.** It re-mirrors the claims at sign-in and returns `claimsUpdated`. The app also refreshes its token whenever it sees the users doc change.
 - **New sign-ups are `seeker` with no team.** A player gets a team in one of two ways:
@@ -117,11 +118,11 @@ npm run seed                # in another terminal: teams, areas, puzzles, 15 art
 ```
 
 `npm run seed` prints the following, all for the emulator:
-- **Dev accounts**, password `openverse-dev`: `admin@`, `surveillance@`, `hider1@` (team ghost), `seeker1@` (team alpha) and `seeker2@openverse.dev` (team bravo).
+- **Dev accounts**, password `openverse-dev`: `admin@`, `surveillance@`, `hider1@` (team ghost), `seeker1@` (team alpha) and `seeker2@iiitkottayam.ac.in` (team bravo).
 - **Team codes:** `ALPHA-DEV-2026`, `BRAVO-DEV-2026`, `GHOST-DEV-2026`, `SHADE-DEV-2026`.
 - **QR codes** in `functions/seed-output/demo-openverse-qr-codes.csv` (git-ignored). Artifact `a11` unlocks the puzzle "The Programmer" (answer `dhh`).
 
-**Pointing the Android app at the emulator.** Create `openverse-native/.env` (git-ignored) with `EXPO_PUBLIC_USE_FIREBASE_EMULATOR=true`. Set `EXPO_PUBLIC_FIREBASE_EMULATOR_HOST` too if you aren't on the Android emulator (which uses `10.0.2.2`). For a USB phone, `adb reverse tcp:9099 tcp:9099` (and the same for 8080 and 5001) with host `127.0.0.1` also works.
+**Pointing the Android app at the emulator.** Copy `openverse-native/.env.example` to `openverse-native/.env`. The Android emulator uses `10.0.2.2` to reach the computer. The login screen then shows a development-only **Use local emulator account** button; production builds continue to show Google login only. For a USB phone, run `adb reverse tcp:9099 tcp:9099`, `adb reverse tcp:8080 tcp:8080`, and `adb reverse tcp:5001 tcp:5001`, then set the host to `127.0.0.1`.
 
 ### Tests
 

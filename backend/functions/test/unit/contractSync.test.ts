@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -10,7 +10,7 @@ const nativeCopy = path.join(root, "openverse-native", "src", "services", "fireb
 const lf = (p: string) => readFileSync(p, "utf8").replace(/\r\n/g, "\n");
 
 describe("client contract copy", () => {
-  it.skipIf(!existsSync(nativeCopy))("openverse-native matches the backend contract (run `npm run sync:contract`)", () => {
+  it("openverse-native matches the backend contract (run `npm run sync:contract`)", () => {
     const copy = lf(nativeCopy);
     expect(copy.slice(copy.indexOf("/**"))).toBe(lf(source).slice(lf(source).indexOf("/**")));
   });

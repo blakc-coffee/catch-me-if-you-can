@@ -9,7 +9,7 @@ import { batchContentHash, uploadLocationBatch } from "../../src/telemetry/locat
 import { updateTelemetry } from "../../src/telemetry/updateTelemetry.js";
 
 // Validation runs before any Firestore access, so these need no emulator.
-const ctx: CallContext = { uid: "u1", email: "u1@test.dev", signInProvider: "password" };
+const ctx: CallContext = { uid: "u1", email: "u1@test.dev", emailVerified: true, signInProvider: "password" };
 
 async function reason(p: Promise<unknown>) {
   try {
