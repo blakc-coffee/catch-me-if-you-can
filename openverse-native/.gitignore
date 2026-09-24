@@ -11,3 +11,4 @@ ios/
 *.p12
 *.mobileprovision
 *.apk
+google-services.json
