@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, BackHandler, StyleSheet, View } from "react-native";
+import { ActivityIndicator, BackHandler, Platform, StyleSheet, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { getAuth, onAuthStateChanged, type User } from "@react-native-firebase/auth";
 import { mission } from "./src/data/mission";
 import { CaseScreen } from "./src/screens/CaseScreen";
+import { LoginScreen } from "./src/screens/LoginScreen";
 import { MissionScreen } from "./src/screens/MissionScreen";
 import { ScannerScreen } from "./src/screens/ScannerScreen";
 import { TrackingScreen } from "./src/screens/TrackingScreen";
@@ -19,6 +21,22 @@ export default function App() {
   const [game, setGame] = useState<GameState>(initialState);
   const [tracking, setTracking] = useState(false);
   const [ready, setReady] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    if (Platform.OS === "web") {
+      setAuthReady(true);
+      return;
+    }
+
+    const unsubscribe = onAuthStateChanged(getAuth(), (nextUser) => {
+      setUser(nextUser);
+      setAuthReady(true);
+    });
+
+    return unsubscribe;
+  }, []);
 
   useEffect(() => {
     Promise.all([loadGameState(), isTracking()])
@@ -64,7 +82,9 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <StatusBar style="light" />
-      {ready ? screen : <View style={styles.loading}><ActivityIndicator color={colors.blue} /></View>}
+      {!ready || !authReady ? (
+        <View style={styles.loading}><ActivityIndicator color={colors.blue} /></View>
+      ) : user ? screen : <LoginScreen />}
     </SafeAreaProvider>
   );
 }
