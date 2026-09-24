@@ -26,6 +26,10 @@ dist/
 build/
 */build/
 
+# Local design/reference applications
+openverse-mobile/
+openverse-web/
+
 # Test reports
 test-results/
 */test-results/
