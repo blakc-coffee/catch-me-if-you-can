@@ -1,0 +1,83 @@
+{
+  "game": {
+    "status": "active",
+    "telemetryMinIntervalSec": 10,
+    "broadcastCooldownSec": 600,
+    "staleAfterSec": 900,
+    "locationRetentionDays": 30
+  },
+  "teams": [
+    { "id": "alpha", "name": "Team Alpha", "type": "seeker", "joinCode": "ALPHA-DEV-2026" },
+    { "id": "bravo", "name": "Team Bravo", "type": "seeker", "joinCode": "BRAVO-DEV-2026" },
+    { "id": "ghost", "name": "Team Ghost", "type": "hider", "joinCode": "GHOST-DEV-2026" },
+    { "id": "shade", "name": "Team Shade", "type": "hider", "joinCode": "SHADE-DEV-2026" }
+  ],
+  "areas": [
+    { "id": "academic-1", "name": "Academic Block 1", "description": "Lecture halls and labs" },
+    { "id": "academic-2", "name": "Academic Block 2", "description": "The newer block" },
+    { "id": "admin", "name": "Admin Block", "description": "Reception and offices" },
+    { "id": "oat", "name": "Open Area Theatre", "description": "The stage faces the sky" },
+    { "id": "dining", "name": "Dining Hall & Cafeteria", "description": "Counters and the tea stall" },
+    { "id": "fitness", "name": "Fitness Centre", "description": "Weights and measures" },
+    { "id": "sports", "name": "Sports Grounds", "description": "Main ground and volleyball court" }
+  ],
+  "puzzles": [
+    {
+      "id": "case-01",
+      "title": "The Programmer",
+      "question": "Sherlock found a programmer, but his name was removed. He created a web framework whose philosophy includes optimizing for programmer happiness; it became known for Convention over Configuration; he later created an opinionated Linux distribution. Who is he? Enter three initials, not the full name.",
+      "answer": "dhh",
+      "points": 50,
+      "tokensAwarded": 1,
+      "hints": ["He is commonly referred to by three initials."],
+      "audience": ["seeker"]
+    },
+    {
+      "id": "ch-01",
+      "title": "ANOMALY_01: Packet Intercept",
+      "question": "A captured frame reads `SGVsbG8gU2Vla2Vy`. Decode it.",
+      "answer": "hello seeker",
+      "points": 50,
+      "tokensAwarded": 1,
+      "hints": ["It is padding-free Base64."],
+      "audience": ["hider"]
+    },
+    {
+      "id": "ch-02",
+      "title": "ANOMALY_02: Open Port",
+      "question": "Which well-known TCP port does SSH listen on by default?",
+      "answer": "22|port 22",
+      "points": 50,
+      "tokensAwarded": 1,
+      "audience": ["hider"]
+    },
+    {
+      "id": "ch-03",
+      "title": "ANOMALY_03: Sequence Break",
+      "question": "2, 3, 5, 7, 11, 13, ? — what comes next?",
+      "answer": "17|seventeen",
+      "points": 200,
+      "tokensAwarded": 2,
+      "audience": ["hider"]
+    }
+  ],
+  "artifacts": [
+    { "key": "a01", "name": "Artifact 01", "areaId": "academic-1", "description": "Where the first lectures begin.", "qrType": "correct" },
+    { "key": "a02", "name": "Artifact 02", "areaId": "academic-1", "description": "Near the stairwell notice board.", "qrType": "correct" },
+    { "key": "a03", "name": "Artifact 03", "areaId": "academic-2", "description": "The newer block keeps a secret.", "qrType": "correct" },
+    { "key": "a04", "name": "Artifact 04", "areaId": "academic-2", "description": "Lab corridor, eye level.", "qrType": "correct" },
+    { "key": "a05", "name": "Artifact 05", "areaId": "admin", "description": "Paperwork flows from here.", "qrType": "correct" },
+    { "key": "a06", "name": "Artifact 06", "areaId": "admin", "description": "Reception, look low.", "qrType": "correct" },
+    { "key": "a07", "name": "Artifact 07", "areaId": "oat", "description": "Back row, left side.", "qrType": "correct" },
+    { "key": "a08", "name": "Artifact 08", "areaId": "oat", "description": "Under the stage lights.", "qrType": "correct" },
+    { "key": "a09", "name": "Artifact 09", "areaId": "dining", "description": "Queue for the counter.", "qrType": "correct" },
+    { "key": "a10", "name": "Artifact 10", "areaId": "dining", "description": "The tea stall knows.", "qrType": "correct" },
+    { "key": "a11", "name": "Artifact 11", "areaId": "fitness", "description": "Find the next marker; it opens a case file.", "qrType": "correct", "puzzleId": "case-01" },
+    { "key": "a12", "name": "Artifact 12", "areaId": "fitness", "description": "Weights and measures.", "qrType": "correct" },
+    { "key": "a13", "name": "Artifact 13", "areaId": "sports", "description": "Centre circle.", "qrType": "correct" },
+    { "key": "a14", "name": "Artifact 14", "areaId": "sports", "description": "Behind the goal post.", "qrType": "correct" },
+    { "key": "a15", "name": "Artifact 15", "areaId": "sports", "description": "Under the volleyball net.", "qrType": "correct" },
+    { "key": "d01", "name": "Decoy Key", "areaId": "oat", "description": "A decoy artifact", "qrType": "wrong", "redirectUrl": "https://example.com/wrong" },
+    { "key": "d02", "name": "Rusty Key", "areaId": "dining", "description": "Another decoy", "qrType": "wrong", "redirectUrl": null }
+  ]
+}

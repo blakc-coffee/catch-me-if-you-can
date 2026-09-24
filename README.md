@@ -23,6 +23,7 @@ Campus-scale alternate reality gaming (ARG) / Capture The Flag (CTF) tactical op
 catch-me-if-you-can/
 ├── openverse-mobile/       # Mobile client application (React, Vite, Motion, Touch Gestures)
 ├── openverse-web/          # Web surveillance & operational interface
+├── backend/                # Firebase: Firestore rules/indexes, Cloud Functions, emulators (see backend/README.md)
 ├── project.md              # Detailed architecture, Firestore schemas & specifications
 ├── .gitignore              # Monorepo ignore rules
 └── README.md               # Repository documentation

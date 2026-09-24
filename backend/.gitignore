@@ -1,0 +1,23 @@
+# Real project binding and credentials never get committed.
+.firebaserc
+google-services.json
+GoogleService-Info.plist
+service-account*.json
+*-firebase-adminsdk-*.json
+
+# Functions env/secrets (keep .env.example files only)
+functions/.env
+functions/.env.*
+!functions/.env.example
+functions/.secret.local
+functions/.runtimeconfig.json
+
+# Build + emulator output
+functions/lib/
+functions/seed-output/
+emulator-data/
+firebase-debug*.log
+firestore-debug.log
+ui-debug.log
+database-debug.log
+pubsub-debug.log
