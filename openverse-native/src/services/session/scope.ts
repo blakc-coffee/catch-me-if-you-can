@@ -45,10 +45,12 @@ export function sameScope(a: { uid: string; eventId: string } | null | undefined
 
 const scopePrefix = (scope: { uid: string; eventId: string }) => `${KEY_PREFIX}u.${scope.uid}.e.${scope.eventId}.`;
 export const userPrefix = (uid: string) => `${KEY_PREFIX}u.${uid}.`;
+export const lastScopeKey = (uid: string) => `${userPrefix(uid)}lastScope`;
 
 export const scopedKeys = (scope: StorageScope) => ({
   game: `${scopePrefix(scope)}game`,
   locations: `${scopePrefix(scope)}locations`,
+  session: `${scopePrefix(scope)}session`,
 });
 
 export function keyBelongsToScope(key: string, scope: { uid: string; eventId: string }): boolean {

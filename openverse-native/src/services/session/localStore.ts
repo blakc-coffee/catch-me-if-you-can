@@ -1,11 +1,15 @@
 import type { GameState, StoredPosition } from "../../types";
+import type { GetMissionStateResponse } from "../firebase/contract";
 import { initialGameState, normalizeGameState } from "./gameState";
+import type { GameSnapshot, ProfileSnapshot } from "./trackingPolicy";
 import {
   ACTIVE_SCOPE_KEY,
   KEY_PREFIX,
   LEGACY_KEYS,
+  createScope,
   isValidEventId,
   isValidUid,
+  lastScopeKey,
   keyBelongsToScope,
   sameScope,
   scopedKeys,
@@ -13,6 +17,13 @@ import {
   type ActiveScopeRecord,
   type StorageScope,
 } from "./scope";
+
+export type CachedSession = {
+  profile: ProfileSnapshot;
+  game: GameSnapshot;
+  mission: GetMissionStateResponse;
+  cachedAtMs: number;
+};
 
 /** The subset of AsyncStorage this module uses (injectable for tests). */
 export interface KeyValueStore {
@@ -104,6 +115,31 @@ export class ScopedStore {
     return this.exclusive(() => this.kv.setItem(scopedKeys(scope).game, JSON.stringify(state)));
   }
 
+  // ------------------------------------------------------------ offline startup
+
+  saveSession(scope: StorageScope, value: CachedSession): Promise<void> {
+    if (value.mission.eventId !== scope.eventId) return Promise.reject(new Error("Cached mission event does not match its storage scope."));
+    return this.exclusive(async () => {
+      await this.kv.setItem(scopedKeys(scope).session, JSON.stringify(value));
+      await this.kv.setItem(lastScopeKey(scope.uid), JSON.stringify({ eventId: scope.eventId }));
+    });
+  }
+
+  async loadSessionForUid(uid: string): Promise<{ scope: StorageScope; value: CachedSession } | null> {
+    if (!isValidUid(uid)) return null;
+    try {
+      const marker = JSON.parse((await this.kv.getItem(lastScopeKey(uid))) ?? "null") as { eventId?: unknown } | null;
+      if (!marker || !isValidEventId(marker.eventId)) return null;
+      const scope = createScope(uid, marker.eventId);
+      const value = JSON.parse((await this.kv.getItem(scopedKeys(scope).session)) ?? "null") as CachedSession | null;
+      if (!value || typeof value !== "object" || !value.profile || !value.game || !value.mission) return null;
+      if (value.mission.eventId !== scope.eventId || typeof value.cachedAtMs !== "number") return null;
+      return { scope, value };
+    } catch {
+      return null;
+    }
+  }
+
   // ------------------------------------------------------------ location queue
 
   loadLocations(scope: StorageScope): Promise<StoredPosition[]> {
@@ -154,7 +190,7 @@ export class ScopedStore {
       const doomed = keys.filter((key) => {
         if ((LEGACY_KEYS as readonly string[]).includes(key)) return true;
         if (!key.startsWith(KEY_PREFIX) || key === ACTIVE_SCOPE_KEY) return false;
-        if (keep.scope) return !keyBelongsToScope(key, keep.scope);
+        if (keep.scope) return key !== lastScopeKey(keep.scope.uid) && !keyBelongsToScope(key, keep.scope);
         if (keep.uid) return !key.startsWith(userPrefix(keep.uid));
         return true;
       });

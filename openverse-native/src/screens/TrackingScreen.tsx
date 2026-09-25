@@ -24,7 +24,7 @@ const DENIAL_MESSAGES: Record<string, string> = {
   "profile-missing": "Your profile is still being set up.",
 };
 
-export function TrackingScreen({ active, scope, decision, onTrackingChange, onSignOut, onNavigate }: { active: boolean; scope: StorageScope | null; decision: TrackingDecision; onTrackingChange: (active: boolean) => void; onSignOut: () => Promise<void>; onNavigate: (route: AppRoute) => void }) {
+export function TrackingScreen({ online, active, scope, decision, onTrackingChange, onSignOut, onNavigate }: { online: boolean; active: boolean; scope: StorageScope | null; decision: TrackingDecision; onTrackingChange: (active: boolean) => void; onSignOut: () => Promise<void>; onNavigate: (route: AppRoute) => void }) {
   const [busy, setBusy] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   // Latest values for the sync, without making every profile/game snapshot re-run it.
@@ -45,7 +45,10 @@ export function TrackingScreen({ active, scope, decision, onTrackingChange, onSi
     onTrackingChange(Boolean(activeScope?.collecting && sameScope(activeScope, scope) && (await isTracking())));
     const queued = await localStore.loadLocations(scope);
     setSamples(queued);
-    if (queued.length === 0) return;
+    if (queued.length === 0 || !online) {
+      if (!online && queued.length > 0) setSyncMessage("Offline: locations remain safely queued on this phone.");
+      return;
+    }
     try {
       const result = await syncLocationQueue(scope, decision);
       setSamples(await localStore.loadLocations(scope));
@@ -61,7 +64,7 @@ export function TrackingScreen({ active, scope, decision, onTrackingChange, onSi
     } catch {
       setSyncMessage("Locations are safely queued for the next sync.");
     }
-  }, [onTrackingChange]);
+  }, [onTrackingChange, online]);
 
   // Sync when the screen opens and when the account, event or tracking
   // authorization changes; explicit actions below call refresh() themselves.
@@ -99,6 +102,11 @@ export function TrackingScreen({ active, scope, decision, onTrackingChange, onSi
           Alert.alert("Location unavailable", "Install a development or release build to test background tracking. It is not available in Expo Go.");
         } else if (result.reason === "foreground-denied") {
           Alert.alert("Location unavailable", "Foreground location permission was not granted.");
+        } else if (result.reason === "notification-denied") {
+          Alert.alert("Notifications required", "Allow notifications so Android can show the persistent mission-tracking indicator.", [
+            { text: "Cancel", style: "cancel" },
+            { text: "Open settings", onPress: () => void Linking.openSettings() },
+          ]);
         } else {
           Alert.alert("Tracking unavailable", DENIAL_MESSAGES[result.reason] ?? "Tracking is only available to active seekers during a live mission.");
         }
@@ -147,14 +155,15 @@ export function TrackingScreen({ active, scope, decision, onTrackingChange, onSi
       {syncMessage ? <Text style={styles.syncMessage}>{syncMessage}</Text> : null}
       {!active && decision.allowed === false ? <Text style={styles.syncMessage}>{DENIAL_MESSAGES[decision.reason] ?? "Tracking is only available to active seekers during a live mission."}</Text> : null}
 
-      <PrimaryButton loading={busy} disabled={!active && decision.allowed !== true} onPress={toggleTracking}>{active ? "Stop background tracking" : "Enable background tracking"}</PrimaryButton>
+      {!online ? <Text style={styles.syncMessage}>Reconnect before starting tracking or changing remote history.</Text> : null}
+      <PrimaryButton loading={busy} disabled={!active && (!online || decision.allowed !== true)} onPress={toggleTracking}>{active ? "Stop background tracking" : "Enable background tracking"}</PrimaryButton>
 
       <Card style={styles.notice}>
         <Text style={styles.noticeTitle}>Android permission flow</Text>
         <Text style={styles.body}>First allow precise location, then choose “Allow all the time.” Android displays a persistent mission notification while tracking.</Text>
       </Card>
 
-      {samples.length > 0 ? <Pressable onPress={clearHistory}><Text style={styles.clear}>Clear stored location history</Text></Pressable> : null}
+      {online && samples.length > 0 ? <Pressable onPress={clearHistory}><Text style={styles.clear}>Clear stored location history</Text></Pressable> : null}
 
       <Pressable accessibilityRole="button" disabled={signingOut} onPress={() => void signOut()} style={styles.signOut}>
         <Text style={styles.signOutText}>{signingOut ? "Signing out…" : "Sign out"}</Text>

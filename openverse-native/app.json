@@ -9,6 +9,7 @@
       "package": "com.openverse.seeker",
       "googleServicesFile": "./google-services.json",
       "versionCode": 1,
+      "allowBackup": false,
       "permissions": [
         "CAMERA",
         "ACCESS_COARSE_LOCATION",
@@ -21,7 +22,8 @@
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_BACKGROUND_LOCATION",
         "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_LOCATION"
+        "android.permission.FOREGROUND_SERVICE_LOCATION",
+        "android.permission.POST_NOTIFICATIONS"
       ]
     },
     "ios": {

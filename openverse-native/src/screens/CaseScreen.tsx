@@ -7,7 +7,8 @@ import type { AppRoute, UnlockedPuzzle } from "../types";
 import type { SubmitPuzzleAnswerResponse } from "../services/firebase/contract";
 import { caseHeader } from "../services/session/caseView";
 
-export function CaseScreen({ puzzles, activePuzzleId, onSelect, onSolved, onNavigate }: {
+export function CaseScreen({ online, puzzles, activePuzzleId, onSelect, onSolved, onNavigate }: {
+  online: boolean;
   puzzles: UnlockedPuzzle[];
   activePuzzleId: string | null;
   onSelect: (puzzleId: string | null) => void;
@@ -108,7 +109,8 @@ export function CaseScreen({ puzzles, activePuzzleId, onSelect, onSolved, onNavi
             />
             {wrong ? <Text style={styles.error}>Answer rejected. Recheck the clues.</Text> : null}
             {error ? <Text style={styles.error}>{error}</Text> : null}
-            <PrimaryButton loading={busy} disabled={!answer.trim()} onPress={() => void submit()}>Submit answer  →</PrimaryButton>
+            {!online ? <Text style={styles.offline}>Reconnect before submitting an answer.</Text> : null}
+            <PrimaryButton loading={busy} disabled={!online || !answer.trim()} onPress={() => void submit()}>Submit answer  →</PrimaryButton>
           </>
         )}
       </>
@@ -139,5 +141,6 @@ const styles = StyleSheet.create({
   back: { color: colors.body, fontSize: 12, marginBottom: 6 },
   successPanel: { paddingTop: 50, alignItems: "center" },
   successIcon: { color: colors.success, fontSize: 46, marginBottom: 14 },
-  successTitle: { color: colors.text, fontSize: 27, fontWeight: "700", marginTop: 9 }
+  successTitle: { color: colors.text, fontSize: 27, fontWeight: "700", marginTop: 9 },
+  offline: { color: colors.blue, fontSize: 11, marginTop: 10 }
 });

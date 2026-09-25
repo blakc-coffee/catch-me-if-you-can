@@ -1,11 +1,12 @@
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
+import { PermissionsAndroid, Platform } from "react-native";
 
 export const LOCATION_TASK_NAME = "openverse-background-location";
 
 export type TrackingPermissionResult =
   | { ok: true }
-  | { ok: false; reason: "foreground-denied" | "background-denied" | "unavailable" };
+  | { ok: false; reason: "foreground-denied" | "background-denied" | "notification-denied" | "unavailable" };
 
 export async function isTracking(): Promise<boolean> {
   return TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
@@ -25,6 +26,13 @@ export async function startLocationUpdates(): Promise<TrackingPermissionResult> 
   const background = await Location.requestBackgroundPermissionsAsync();
   if (background.status !== Location.PermissionStatus.GRANTED) {
     return { ok: false, reason: "background-denied" };
+  }
+
+  if (Platform.OS === "android" && Number(Platform.Version) >= 33) {
+    const notifications = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
+    if (notifications !== PermissionsAndroid.RESULTS.GRANTED) {
+      return { ok: false, reason: "notification-denied" };
+    }
   }
 
   if (!(await isTracking())) {

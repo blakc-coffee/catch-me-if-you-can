@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ScopedStore } from "./localStore";
+import { ScopedStore, type CachedSession } from "./localStore";
 import { ACTIVE_SCOPE_KEY, LEGACY_KEYS, createScope, scopedKeys } from "./scope";
 import { MemoryKV, sample } from "./testSupport";
 
@@ -76,6 +76,27 @@ describe("ScopedStore", () => {
     expect(await after.loadLocations(A1)).toHaveLength(5);
     expect(await after.loadGameState(A1)).toMatchObject({ claimedArtifactIds: ["art-1"] });
     expect(await after.appendLocations(A1, [sample(5)])).toBe(true);
+  });
+
+  it("restores only the same account and event session during an offline cold start", async () => {
+    const kv = new MemoryKV();
+    const store = new ScopedStore(kv);
+    const cached: CachedSession = {
+      profile: { role: "seeker", status: "active", teamId: "alpha" },
+      game: { status: "active", eventId: "event-1" },
+      mission: {
+        eventId: "event-1",
+        gameStatus: "active" as const,
+        team: { teamId: "alpha", name: "Alpha", type: "seeker", score: 10, tokens: 1, artifactsClaimed: 2, puzzlesSolved: 0 },
+        totalArtifacts: 15,
+        puzzles: [],
+      },
+      cachedAtMs: 123,
+    };
+    await store.saveSession(A1, cached);
+    expect(await new ScopedStore(kv).loadSessionForUid("uidA")).toEqual({ scope: A1, value: cached });
+    expect(await store.loadSessionForUid("uidB")).toBeNull();
+    await expect(store.saveSession(A2, cached)).rejects.toThrow(/event/i);
   });
 
   it("removes exactly the uploaded samples, keeps samples appended meanwhile, and never touches another account", async () => {

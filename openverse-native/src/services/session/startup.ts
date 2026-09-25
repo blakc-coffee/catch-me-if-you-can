@@ -1,7 +1,7 @@
 import type { StorageScope } from "./scope";
 import type { TrackingDecision } from "./trackingPolicy";
 
-export type ProfileSync = "pending" | "ok" | "error";
+export type ProfileSync = "pending" | "ok" | "offline" | "error";
 
 export type StartupPhase =
   /** Firebase has not reported the persisted user yet. */
@@ -11,6 +11,8 @@ export type StartupPhase =
   | "syncing-profile"
   /** Profile sync failed for a retryable reason (e.g. offline): offer retry or sign-out. */
   | "profile-error"
+  /** A required Firestore listener failed and can be explicitly retried. */
+  | "listener-error"
   /** Signed in, waiting for the profile/game documents and this account's local state. */
   | "loading-account"
   | "ready";
@@ -29,11 +31,13 @@ export function startupPhase(s: {
   gameLoaded: boolean;
   scopeKey: string | null;
   localStateKey: string | null;
+  listenerFailed: boolean;
 }): StartupPhase {
   if (!s.authResolved) return "resolving-auth";
   if (!s.uid) return "signed-out";
   if (s.profileSync === "pending") return "syncing-profile";
   if (s.profileSync === "error") return "profile-error";
+  if (s.profileSync !== "offline" && s.listenerFailed) return "listener-error";
   if (!s.profileLoaded || !s.gameLoaded || !s.scopeKey || s.localStateKey !== s.scopeKey) return "loading-account";
   return "ready";
 }

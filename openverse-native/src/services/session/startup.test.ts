@@ -12,6 +12,7 @@ const readyInput = {
   gameLoaded: true,
   scopeKey: scopeKeyOf(A),
   localStateKey: scopeKeyOf(A),
+  listenerFailed: false,
 };
 
 describe("startup phase", () => {
@@ -20,9 +21,15 @@ describe("startup phase", () => {
     expect(startupPhase({ ...readyInput, uid: null })).toBe("signed-out");
     expect(startupPhase({ ...readyInput, profileSync: "pending" })).toBe("syncing-profile");
     expect(startupPhase({ ...readyInput, profileSync: "error" })).toBe("profile-error");
+    expect(startupPhase({ ...readyInput, listenerFailed: true })).toBe("listener-error");
     expect(startupPhase({ ...readyInput, profileLoaded: false })).toBe("loading-account");
     expect(startupPhase({ ...readyInput, gameLoaded: false })).toBe("loading-account");
     expect(startupPhase(readyInput)).toBe("ready");
+  });
+
+  it("allows a correctly scoped offline cache but does not hide an online listener failure", () => {
+    expect(startupPhase({ ...readyInput, profileSync: "offline", listenerFailed: true })).toBe("ready");
+    expect(startupPhase({ ...readyInput, profileSync: "ok", listenerFailed: true })).toBe("listener-error");
   });
 
   it("never shows a persisted user before auth has resolved", () => {

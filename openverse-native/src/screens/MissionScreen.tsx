@@ -22,7 +22,8 @@ function objectiveCopy(objective: Objective): { eyebrow: string; title: string; 
   }
 }
 
-export function MissionScreen({ summary, tracking, onRetry, onOpenCase, onNavigate }: {
+export function MissionScreen({ online, summary, tracking, onRetry, onOpenCase, onNavigate }: {
+  online: boolean;
   summary: MissionSummary;
   tracking: boolean;
   onRetry: () => void;
@@ -52,6 +53,7 @@ export function MissionScreen({ summary, tracking, onRetry, onOpenCase, onNaviga
     <AppShell active="mission" onNavigate={onNavigate}>
       <Text style={styles.title}>{summary.teamName}</Text>
       <Text style={styles.subtitle}>Explore the campus. Find the artifacts.</Text>
+      {!online ? <Text style={styles.offline}>OFFLINE · Showing cached mission data. Scanning, submissions, and new tracking sessions are disabled.</Text> : null}
 
       <Card style={styles.statusCard}>
         <View style={styles.liveRow}><View style={styles.liveDot} /><Eyebrow>TEAM PROGRESS</Eyebrow></View>
@@ -80,7 +82,7 @@ export function MissionScreen({ summary, tracking, onRetry, onOpenCase, onNaviga
       {openPuzzleId ? (
         <PrimaryButton onPress={() => onOpenCase(openPuzzleId)}>Open case file  →</PrimaryButton>
       ) : (
-        <PrimaryButton onPress={() => onNavigate("scanner")}>Open scanner  →</PrimaryButton>
+        <PrimaryButton disabled={!online} onPress={() => onNavigate("scanner")}>Open scanner  →</PrimaryButton>
       )}
 
       <View style={styles.sharing}>
@@ -118,5 +120,6 @@ const styles = StyleSheet.create({
   sectionLabel: { color: "#A7B3C7", fontSize: 10, marginTop: 34, marginBottom: 10, letterSpacing: 0.7 },
   objective: { color: colors.text, fontSize: 20, fontWeight: "700", marginTop: 13 },
   sharing: { marginTop: 2 },
-  sharingCopy: { color: colors.body, fontSize: 12 }
+  sharingCopy: { color: colors.body, fontSize: 12 },
+  offline: { color: colors.blue, fontSize: 11, lineHeight: 17, marginTop: 12 }
 });
