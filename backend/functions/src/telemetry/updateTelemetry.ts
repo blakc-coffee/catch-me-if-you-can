@@ -53,6 +53,7 @@ export async function updateTelemetry(ctx: CallContext, raw: unknown): Promise<U
   const speedKmh = input.speedMps === undefined ? null : Math.round(input.speedMps * 36) / 10;
 
   await d.runTransaction(async (tx) => {
+    requireGameActive(await loadGame(d, tx));
     const user = requirePlayer(await loadActor(d, tx, ctx.uid), ["seeker"]);
     const now = FieldValue.serverTimestamp();
     tx.set(

@@ -149,7 +149,7 @@ npm run test:emulator       # rules, handlers against Firestore/Auth, e2e throug
 - game end and elimination;
 - the puzzle-mirror trigger.
 
-The app's offline queue has its own tests: `cd openverse-native && npm test`.
+The native client is checked with `cd openverse-native && npm run typecheck`; an Android production bundle can be verified with `npx expo export --platform android`.
 
 After changing `functions/src/shared/contract.ts`, run `npm run sync:contract`. A unit test fails if the app's copy drifts.
 

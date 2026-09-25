@@ -108,10 +108,10 @@ export async function seedGame(db: Firestore, raw: SeedData): Promise<{ artifact
         question: p.question,
         answer: p.answer,
         createdAt: now,
-        ...(p.points === undefined ? {} : { points: p.points }),
-        ...(p.tokensAwarded === undefined ? {} : { tokensAwarded: p.tokensAwarded }),
-        ...(p.hints === undefined ? {} : { hints: p.hints }),
-        ...(p.audience === undefined ? {} : { audience: p.audience }),
+        points: p.points ?? FieldValue.delete(),
+        tokensAwarded: p.tokensAwarded ?? FieldValue.delete(),
+        hints: p.hints ?? FieldValue.delete(),
+        audience: p.audience ?? FieldValue.delete(),
       },
       { merge: true },
     );
@@ -137,8 +137,10 @@ export async function seedGame(db: Firestore, raw: SeedData): Promise<{ artifact
   }
   const artifacts: SeededArtifact[] = [];
   const artifactWriter = db.bulkWriter();
+  const retainedArtifactIds = new Set<string>();
   for (const a of data.artifacts) {
     const qrCode = a.qrCode ?? existing.get(a.key) ?? newQrCode();
+    retainedArtifactIds.add(qrCode);
     artifacts.push({ key: a.key, qrCode, name: a.name, qrType: a.qrType, puzzleId: a.puzzleId ?? null });
     void artifactWriter.set(
       db.collection(COL.artifacts).doc(qrCode),
@@ -153,10 +155,15 @@ export async function seedGame(db: Firestore, raw: SeedData): Promise<{ artifact
         isActive: true,
         seedKey: a.key,
         createdAt: now,
-        ...(a.points === undefined ? {} : { points: a.points }),
+        points: a.points ?? FieldValue.delete(),
       },
       { merge: true },
     );
+  }
+  for (const [seedKey, artifactId] of existing) {
+    if (!data.artifacts.some((artifact) => artifact.key === seedKey) || !retainedArtifactIds.has(artifactId)) {
+      void artifactWriter.delete(db.collection(COL.artifacts).doc(artifactId));
+    }
   }
   await artifactWriter.close();
 

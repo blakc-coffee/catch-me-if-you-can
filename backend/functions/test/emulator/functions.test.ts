@@ -11,8 +11,8 @@ import { submitPuzzleAnswer } from "../../src/puzzles/submitPuzzleAnswer.js";
 import { joinTeam } from "../../src/teams/joinTeam.js";
 import { deleteLocationHistory, uploadLocationBatch } from "../../src/telemetry/locationBatches.js";
 import { stopTracking, updateTelemetry } from "../../src/telemetry/updateTelemetry.js";
-import type { SeededArtifact } from "../../scripts/seedGame.js";
-import { CODES, docData, expectReason, makeUser, onCampus, resetEmulators, seed } from "./helpers.js";
+import { seedGame, type SeededArtifact } from "../../scripts/seedGame.js";
+import { CODES, docData, expectReason, makeUser, onCampus, resetEmulators, seed, seedData } from "./helpers.js";
 
 let qr: Map<string, SeededArtifact>;
 const code = (key: string) => qr.get(key)!.qrCode;
@@ -26,6 +26,26 @@ beforeEach(async () => {
 });
 
 describe("compatibility with existing seekerdb documents", () => {
+  it("reconciles removed seed artifacts and clears omitted optional fields", async () => {
+    const removedArtifactId = code("a02");
+    const retainedArtifactId = code("a01");
+    await db().doc(`artifacts/${retainedArtifactId}`).update({ points: 999 });
+
+    const reseed = structuredClone(seedData);
+    reseed.artifacts = reseed.artifacts.filter((artifact) => artifact.key !== "a02");
+    delete reseed.puzzles[0]!.points;
+    delete reseed.puzzles[0]!.tokensAwarded;
+    delete reseed.puzzles[0]!.hints;
+    delete reseed.puzzles[0]!.audience;
+    await seedGame(db(), reseed);
+
+    expect(await docData(`artifacts/${removedArtifactId}`)).toBeUndefined();
+    expect(Object.keys((await docData(`artifacts/${retainedArtifactId}`))!)).not.toContain("points");
+    const puzzle = (await docData<Record<string, unknown>>("puzzles/case-01"))!;
+    expect(Object.keys(puzzle)).not.toEqual(expect.arrayContaining(["points", "tokensAwarded", "hints", "audience"]));
+    expect(await docData("puzzlePublic/case-01")).toMatchObject({ points: 100, tokensAwarded: 1, hints: [], audience: ["seeker"] });
+  });
+
   it("backfills server fields on admin-provisioned users without changing name, role or team", async () => {
     const rec = await auth().createUser({ email: "seeker1@example.com" });
     await auth().setCustomUserClaims(rec.uid, { role: "seeker" });

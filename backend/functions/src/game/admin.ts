@@ -25,6 +25,8 @@ export async function setGameStatus(ctx: CallContext, raw: unknown): Promise<Set
   await consumeRateLimit(d, `admin_${ctx.uid}`, RATE_LIMITS.adminAction);
 
   await d.runTransaction(async (tx) => {
+    const currentActor = await loadActor(d, tx, ctx.uid);
+    requireRole(currentActor.role, ["admin"]);
     const snap = await tx.get(refs.game(d));
     const now = FieldValue.serverTimestamp();
     if (snap.exists) tx.update(snap.ref, { status, updatedAt: now });
@@ -54,6 +56,8 @@ export async function eliminatePlayer(ctx: CallContext, raw: unknown): Promise<E
   await consumeRateLimit(d, `admin_${ctx.uid}`, RATE_LIMITS.adminAction);
 
   await d.runTransaction(async (tx) => {
+    const currentActor = await loadActor(d, tx, ctx.uid);
+    requireRole(currentActor.role, ["surveillance", "admin"]);
     const user = await read<UserDoc>(tx, refs.user(d, uid));
     if (!user) fail("not-found", "USER_NOT_FOUND", "User has no profile.");
     const seeker = await read<SeekerDoc>(tx, refs.seeker(d, uid));

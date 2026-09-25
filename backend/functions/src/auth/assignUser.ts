@@ -36,6 +36,11 @@ export async function assignUser(ctx: CallContext, raw: unknown): Promise<Assign
   await consumeRateLimit(d, `admin_${ctx.uid}`, RATE_LIMITS.adminAction);
 
   const result = await d.runTransaction(async (tx) => {
+    const currentActor = await loadActor(d, tx, ctx.uid);
+    requireRole(currentActor.role, ["admin"]);
+    if (input.uid === ctx.uid && input.role !== undefined && input.role !== currentActor.role) {
+      fail("failed-precondition", "CANNOT_CHANGE_OWN_ROLE", "Admins cannot change their own role.");
+    }
     const data = await read<Partial<UserDoc>>(tx, refs.user(d, input.uid));
     if (!data) fail("not-found", "USER_NOT_FOUND", "User has no profile.");
     const current = withUserDefaults(input.uid, data);

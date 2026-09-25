@@ -18,14 +18,13 @@ import type { CreateBroadcastResponse } from "../shared/contract.js";
 export async function createBroadcast(ctx: CallContext, raw: unknown): Promise<CreateBroadcastResponse> {
   parseInput(z.strictObject({}), raw ?? {});
   const d = db();
-  const actor = await loadActor(d, d, ctx.uid);
-  requireRole(actor.role, ["surveillance", "admin"]);
-
   const gameRef = refs.game(d);
   const seekersQuery = d.collection(COL.seekers).where("active", "==", true).limit(1000);
 
   return d.runTransaction(async (tx) => {
     const nowMs = Date.now();
+    const actor = await loadActor(d, tx, ctx.uid);
+    requireRole(actor.role, ["surveillance", "admin"]);
     const game = requireGameActive((await tx.get(gameRef)).data() as GameDoc | undefined);
 
     const cooldownMs = game.broadcastCooldownSec * 1000;

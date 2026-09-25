@@ -36,10 +36,11 @@ export async function joinTeam(ctx: CallContext, raw: unknown): Promise<JoinTeam
   const d = db();
   await consumeRateLimit(d, `join_${ctx.uid}`, RATE_LIMITS.joinTeam);
 
-  const code = await read<TeamJoinCodeDoc>(d, d.collection(COL.teamJoinCodes).doc(joinCodeKey(joinCode)));
-  if (!code?.active) fail("not-found", "INVALID_JOIN_CODE", "Invalid team code.");
+  const codeRef = d.collection(COL.teamJoinCodes).doc(joinCodeKey(joinCode));
 
   const result = await d.runTransaction(async (tx) => {
+    const code = await read<TeamJoinCodeDoc>(tx, codeRef);
+    if (!code?.active) fail("not-found", "INVALID_JOIN_CODE", "Invalid team code.");
     const user = await loadActor(d, tx, ctx.uid);
     const team = await loadTeam(d, tx, code.teamId);
     const seeker = await read<SeekerDoc>(tx, refs.seeker(d, ctx.uid));

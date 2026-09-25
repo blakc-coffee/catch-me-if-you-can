@@ -1,7 +1,7 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { z } from "zod";
 import { CONTENT_DEFAULTS, RATE_LIMITS } from "../config.js";
-import { loadActor, loadGame, loadTeam, read, refs, requireGameActive, requirePlayer, type CallContext } from "../lib/context.js";
+import { loadActor, loadGame, loadTeam, refs, requireGameActive, requirePlayer, type CallContext } from "../lib/context.js";
 import { fail } from "../lib/errors.js";
 import { db } from "../lib/firebase.js";
 import { answerMatches } from "../lib/normalize.js";
@@ -41,33 +41,34 @@ export async function submitPuzzleAnswer(ctx: CallContext, raw: unknown): Promis
   await consumeRateLimit(d, `answer_${ctx.uid}`, RATE_LIMITS.puzzleAnswerGlobal);
   await consumeRateLimit(d, `answer_${ctx.uid}_${puzzleId}`, RATE_LIMITS.puzzleAnswerPerPuzzle);
 
-  const user = requirePlayer(await loadActor(d, d, ctx.uid), ["seeker", "hider"]);
-  requireGameActive(await loadGame(d, d));
-  const puzzle = await read<PuzzleDoc>(d, d.collection(COL.puzzles).doc(puzzleId));
-  // Puzzles outside the caller's audience are reported as missing, not forbidden.
-  if (!puzzle || !publicAudience(puzzle).includes(user.role)) notFound();
-  if (user.role === "seeker") {
-    const unlock = await d.collection(COL.puzzleUnlocks).doc(docIds.puzzleUnlock(user.teamId, puzzleId)).get();
-    if (!unlock.exists) fail("failed-precondition", "PUZZLE_LOCKED", "Scan the linked artifact to unlock this puzzle.");
-  }
-
   const claimRef = d.collection(COL.puzzleClaims).doc(puzzleId);
-  const prior = await read<PuzzleClaimDoc>(d, claimRef);
-  if (prior) return alreadyClaimed(puzzleId, prior, user.teamId);
-
-  if (!answerMatches(typeof puzzle.answer === "string" ? puzzle.answer : "", answer)) {
-    return { status: "INCORRECT", puzzleId };
-  }
-
-  const points = typeof puzzle.points === "number" ? puzzle.points : CONTENT_DEFAULTS.puzzlePoints;
-  const tokens = typeof puzzle.tokensAwarded === "number" ? puzzle.tokensAwarded : CONTENT_DEFAULTS.puzzleTokens;
+  const puzzleRef = d.collection(COL.puzzles).doc(puzzleId);
 
   return d.runTransaction(
     async (tx): Promise<SubmitPuzzleAnswerResponse> => {
-      const claimSnap = await tx.get(claimRef);
-      if (claimSnap.exists) return alreadyClaimed(puzzleId, claimSnap.data() as PuzzleClaimDoc, user.teamId);
       const current = requirePlayer(await loadActor(d, tx, ctx.uid), ["seeker", "hider"]);
+      requireGameActive(await loadGame(d, tx));
+      const puzzleSnap = await tx.get(puzzleRef);
+      const puzzle = puzzleSnap.data() as PuzzleDoc | undefined;
+      // Puzzles outside the caller's audience are reported as missing, not forbidden.
+      if (!puzzle || !publicAudience(puzzle).includes(current.role)) notFound();
+
+      if (current.role === "seeker") {
+        const unlockRef = d.collection(COL.puzzleUnlocks).doc(docIds.puzzleUnlock(current.teamId, puzzleId));
+        if (!(await tx.get(unlockRef)).exists) {
+          fail("failed-precondition", "PUZZLE_LOCKED", "Scan the linked artifact to unlock this puzzle.");
+        }
+      }
+
+      const claimSnap = await tx.get(claimRef);
+      if (claimSnap.exists) return alreadyClaimed(puzzleId, claimSnap.data() as PuzzleClaimDoc, current.teamId);
+      if (!answerMatches(typeof puzzle.answer === "string" ? puzzle.answer : "", answer)) {
+        return { status: "INCORRECT", puzzleId };
+      }
+
       const team = await loadTeam(d, tx, current.teamId);
+      const points = typeof puzzle.points === "number" ? puzzle.points : CONTENT_DEFAULTS.puzzlePoints;
+      const tokens = typeof puzzle.tokensAwarded === "number" ? puzzle.tokensAwarded : CONTENT_DEFAULTS.puzzleTokens;
 
       const now = FieldValue.serverTimestamp();
       const solvedBy = { uid: ctx.uid, playerId: current.playerId, name: current.name, teamId: current.teamId, teamName: team.name };
