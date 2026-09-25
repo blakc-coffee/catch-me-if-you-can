@@ -8,7 +8,7 @@ import {
   Text,
   View
 } from "react-native";
-import { GoogleAuthProvider, getAuth, signInWithCredential } from "@react-native-firebase/auth";
+import { GoogleAuthProvider, getAuth, signInWithCredential, signInWithEmailAndPassword } from "@react-native-firebase/auth";
 import {
   GoogleSignin,
   isErrorWithCode,
@@ -16,6 +16,7 @@ import {
 } from "@react-native-google-signin/google-signin";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { colors } from "../theme";
+import { useFirebaseEmulators } from "../services/firebase/config";
 
 const logo = require("../../assets/ov.jpeg");
 const googleIcon = require("../../assets/google-g.png");
@@ -51,6 +52,11 @@ export function LoginScreen() {
 
       const idToken = signInResult.data.idToken;
       if (!idToken) throw new Error("Google did not return an ID token.");
+      if (!signInResult.data.user.email.toLowerCase().endsWith("@iiitkottayam.ac.in")) {
+        await GoogleSignin.signOut();
+        setError("Use your verified @iiitkottayam.ac.in account.");
+        return;
+      }
 
       const credential = GoogleAuthProvider.credential(idToken);
       await signInWithCredential(getAuth(), credential);
@@ -62,6 +68,20 @@ export function LoginScreen() {
       } else {
         setError("Google sign-in failed. Please try again.");
       }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const signInLocally = async () => {
+    const email = process.env.EXPO_PUBLIC_EMULATOR_EMAIL ?? "seeker1@iiitkottayam.ac.in";
+    const password = process.env.EXPO_PUBLIC_EMULATOR_PASSWORD ?? "openverse-dev";
+    setSubmitting(true);
+    setError(null);
+    try {
+      await signInWithEmailAndPassword(getAuth(), email, password);
+    } catch {
+      setError("Local sign-in failed. Start and seed the Firebase emulators first.");
     } finally {
       setSubmitting(false);
     }
@@ -100,6 +120,17 @@ export function LoginScreen() {
             </View>
             <Text style={styles.signInText}>{submitting ? "Connecting…" : "Login with Google"}</Text>
           </Pressable>
+
+          {useFirebaseEmulators ? (
+            <Pressable
+              accessibilityRole="button"
+              disabled={submitting}
+              onPress={() => void signInLocally()}
+              style={({ pressed }) => [styles.localButton, pressed && styles.buttonPressed]}
+            >
+              <Text style={styles.localButtonText}>Use local emulator account</Text>
+            </Pressable>
+          ) : null}
 
           <Text style={styles.helper}>Use @iiitkottayam.ac.in mail ID</Text>
         </View>
@@ -179,6 +210,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textAlign: "center"
   },
+  localButton: { marginTop: 12, paddingVertical: 10, alignItems: "center" },
+  localButtonText: { color: "#8E95A7", fontSize: 12, fontWeight: "600" },
   buttonDisabled: { opacity: 0.65 },
   buttonPressed: { opacity: 0.82 }
 });

@@ -1,0 +1,159 @@
+rules_version = '2';
+
+// OpenVerse Firestore security rules for the seekerdb schema.
+//
+//  * Existing collections keep their original access model: admins manage
+//    content (teams, artifacts, puzzles, areas) from the client; artifacts are
+//    visible to admin/surveillance/hider; puzzles (which hold answers) to
+//    admins only; teams and areas to any signed-in user.
+//  * Roles, team membership, scores, tokens, claims, telemetry and broadcasts
+//    are written ONLY by Cloud Functions (Admin SDK bypasses these rules).
+//  * `role` and `teamId` come from custom claims, which functions mirror from
+//    users/{uid}. Roles are lower-case: seeker, hider, surveillance, admin.
+//  * Everything not matched below is denied (teamJoinCodes, rateLimits, ...).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null
+        && request.auth.token.get('email_verified', false) == true
+        && request.auth.token.get('email', '').matches('.*@iiitkottayam\\.ac\\.in$');
+    }
+
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function role() {
+      return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '')
+        : '';
+    }
+
+    function myTeam() {
+      return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('teamId', null)
+        : null;
+    }
+
+    function hasRole(roles) {
+      return signedIn() && role() in roles;
+    }
+
+    function isAdmin() {
+      return hasRole(['admin']);
+    }
+
+    function isStaff() {
+      return hasRole(['surveillance', 'admin']);
+    }
+
+    function onMyTeam(teamId) {
+      return signedIn() && myTeam() != null && teamId == myTeam();
+    }
+
+    function changedOnly(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+    }
+
+    // Server-maintained team counters that no client may set.
+    function teamCounters() {
+      return ['score', 'tokens', 'artifactsClaimed', 'puzzlesSolved'];
+    }
+
+    // ---------------------------------------------------------------- existing schema
+
+    match /users/{uid} {
+      allow read: if isSelf(uid) || isStaff();
+      // Players (and admins) may rename; role, teamId, score, tokens and status change only via functions.
+      allow update: if (isSelf(uid) || isAdmin())
+        && changedOnly(['name', 'updatedAt'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 2
+        && request.resource.data.name.size() <= 40;
+      allow create, delete: if false;
+    }
+
+    match /teams/{teamId} {
+      allow read: if signedIn();
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly(['name', 'type', 'createdAt', 'updatedAt'])
+        && request.resource.data.type in ['seeker', 'hider'];
+      allow update: if isAdmin()
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(teamCounters())
+        && request.resource.data.type in ['seeker', 'hider'];
+      allow delete: if isAdmin();
+    }
+
+    match /artifacts/{qrCode} {
+      allow read: if hasRole(['admin', 'surveillance']);
+      allow write: if isAdmin();
+    }
+
+    // Holds plaintext answers: admins only. Players read puzzlePublic.
+    match /puzzles/{puzzleId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /areas/{areaId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    // ---------------------------------------------------------------- server-owned
+
+    match /game/{docId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    // Latest position only. SURVEILLANCE sees active seekers; ADMIN sees all.
+    match /seekers/{uid} {
+      allow read: if isSelf(uid)
+        || isAdmin()
+        || (hasRole(['surveillance']) && resource.data.active == true);
+      allow write: if false;
+
+      // Private route history: owner and ADMIN only.
+      match /locationBatches/{batchId} {
+        allow read: if isSelf(uid) || isAdmin();
+        allow write: if false;
+      }
+    }
+
+    match /artifactClaims/{claimId} {
+      allow read: if isStaff() || onMyTeam(resource.data.teamId);
+      allow write: if false;
+    }
+
+    match /puzzleUnlocks/{unlockId} {
+      allow read: if isStaff() || onMyTeam(resource.data.teamId);
+      allow write: if false;
+    }
+
+    // Answer-free puzzle text. Seekers need their team's unlock; hiders need to be in the audience.
+    match /puzzlePublic/{puzzleId} {
+      allow read: if isStaff()
+        || (hasRole(['seeker'])
+            && myTeam() != null
+            && exists(/databases/$(database)/documents/puzzleUnlocks/$(myTeam() + '_' + puzzleId)))
+        || (hasRole(['hider']) && 'hider' in resource.data.audience);
+      allow write: if false;
+    }
+
+    match /puzzleClaims/{puzzleId} {
+      allow read: if isStaff() || onMyTeam(resource.data.teamId);
+      allow write: if false;
+    }
+
+    match /broadcasts/{broadcastId} {
+      allow read: if hasRole(['hider', 'surveillance', 'admin']);
+      allow write: if false;
+    }
+
+    // ---------------------------------------------------------------- default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

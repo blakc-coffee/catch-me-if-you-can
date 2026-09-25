@@ -23,6 +23,7 @@ Campus-scale alternate reality gaming (ARG) / Capture The Flag (CTF) tactical op
 catch-me-if-you-can/
 ├── openverse-mobile/       # Mobile client application (React, Vite, Motion, Touch Gestures)
 ├── openverse-web/          # Web surveillance & operational interface
+├── backend/                # Firebase: Firestore rules/indexes, Cloud Functions, emulators (see backend/README.md)
 ├── project.md              # Detailed architecture, Firestore schemas & specifications
 ├── .gitignore              # Monorepo ignore rules
 └── README.md               # Repository documentation
@@ -49,7 +50,7 @@ The current prototype includes the seeker mission dashboard, QR scanner, Program
 
 ### Native Mobile Client (`openverse-native`)
 
-The installable app is a real Expo/React Native client with native QR camera access, Android/iOS background location support, and offline on-device storage. It does not use Firebase, localhost, or another backend.
+The installable app is a real Expo/React Native client with native QR camera access, Android/iOS background location support, offline queueing, Firebase Authentication, and callable Cloud Functions backed by Firestore. Local development can target the Firebase Emulator Suite; production builds must keep emulator mode disabled.
 
 ```bash
 cd openverse-native
