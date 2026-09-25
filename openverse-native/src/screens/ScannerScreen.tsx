@@ -1,5 +1,5 @@
-import { useCallback, useState } from "react";
-import { CameraView, useCameraPermissions, type BarcodeScanningResult } from "expo-camera";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { CameraView, useCameraPermissions, type BarcodeScanningResult, type BarcodeSettings } from "expo-camera";
 import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { AppShell } from "../components/AppShell";
 import { Card, Eyebrow, PrimaryButton } from "../components/Primitives";
@@ -7,6 +7,8 @@ import { colors } from "../theme";
 import type { AppRoute } from "../types";
 import type { ClaimArtifactResponse } from "../services/firebase/contract";
 import { getCallableReason } from "../services/firebase/callables";
+
+const BARCODE_SETTINGS: BarcodeSettings = { barcodeTypes: ["qr"] };
 
 export function ScannerScreen({ online, onNavigate, onScanned }: { online: boolean; onNavigate: (route: AppRoute) => void; onScanned: (payload: string) => Promise<ClaimArtifactResponse> }) {
   const [permission, requestPermission] = useCameraPermissions();
@@ -16,19 +18,58 @@ export function ScannerScreen({ online, onNavigate, onScanned }: { online: boole
   const [error, setError] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
 
-  const handleBarcode = useCallback((result: BarcodeScanningResult) => {
-    if (payload) return;
-    setPayload(result.data);
+  const scanLock = useRef(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const handleBarcode = useCallback((barcodeResult: BarcodeScanningResult) => {
+    if (scanLock.current) return;
+    const raw = barcodeResult?.data;
+    if (typeof raw !== "string" || !raw.trim()) return;
+
+    scanLock.current = true;
+    setPayload(raw);
     setVerifying(true);
     setError(null);
-    void onScanned(result.data)
-      .then(setResult)
-      .catch((scanError) => {
-        const reason = getCallableReason(scanError);
-        setError(reason === "INVALID_ARTIFACT_CODE" ? "This QR code is not a valid Openverse artifact." : "Artifact verification failed. Check your connection and try again.");
+
+    void onScanned(raw)
+      .then((res) => {
+        if (!mountedRef.current) return;
+        setResult(res);
       })
-      .finally(() => setVerifying(false));
-  }, [onScanned, payload]);
+      .catch((scanError) => {
+        if (!mountedRef.current) return;
+        const reason = getCallableReason(scanError);
+        if (reason === "INVALID_ARTIFACT_CODE") {
+          setError("This QR code is not a valid Openverse artifact.");
+        } else if (reason === "ARTIFACT_ALREADY_CLAIMED") {
+          setError("Your team has already claimed this artifact.");
+        } else if (reason === "RATE_LIMITED") {
+          setError("Too many scan attempts. Please wait a moment.");
+        } else {
+          setError("Artifact verification failed. Check your connection and try again.");
+        }
+      })
+      .finally(() => {
+        if (mountedRef.current) {
+          setVerifying(false);
+        }
+      });
+  }, [onScanned]);
+
+  const handleScanAgain = useCallback(() => {
+    scanLock.current = false;
+    setPayload(null);
+    setResult(null);
+    setError(null);
+    setVerifying(false);
+  }, []);
 
   return (
     <AppShell active="scanner" title="ARTIFACT SCANNER" onNavigate={onNavigate} scroll={false}>
@@ -62,8 +103,8 @@ export function ScannerScreen({ online, onNavigate, onScanned }: { online: boole
               style={StyleSheet.absoluteFill}
               facing="back"
               enableTorch={torch}
-              barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
-              onBarcodeScanned={payload ? undefined : handleBarcode}
+              barcodeScannerSettings={BARCODE_SETTINGS}
+              onBarcodeScanned={handleBarcode}
             />
             <View pointerEvents="none" style={styles.target}>
               <View style={[styles.corner, styles.topLeft]} />
@@ -82,15 +123,15 @@ export function ScannerScreen({ online, onNavigate, onScanned }: { online: boole
         {result ? (
           <Card style={styles.result}>
             <Text style={styles.success}>{result.status === "DECOY" ? "○  DECOY ARTIFACT" : "✓  ARTIFACT CLAIMED"}</Text>
-            <Text numberOfLines={1} style={styles.resultText}>{result.name}</Text>
+            <Text numberOfLines={1} style={styles.resultText}>{result.name || "Artifact verified"}</Text>
             {result.status === "CLAIMED" && result.puzzle ? <PrimaryButton onPress={() => onNavigate("case")}>Open case file  →</PrimaryButton> : null}
-            <Pressable onPress={() => { setPayload(null); setResult(null); setError(null); }}><Text style={styles.scanAgain}>Scan another code</Text></Pressable>
+            <Pressable onPress={handleScanAgain}><Text style={styles.scanAgain}>Scan another code</Text></Pressable>
           </Card>
         ) : null}
         {error ? (
           <Card style={styles.result}>
             <Text style={styles.error}>{error}</Text>
-            <Pressable onPress={() => { setPayload(null); setError(null); }}><Text style={styles.scanAgain}>Try another code</Text></Pressable>
+            <Pressable onPress={handleScanAgain}><Text style={styles.scanAgain}>Try another code</Text></Pressable>
           </Card>
         ) : null}
       </View>
