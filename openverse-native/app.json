@@ -52,6 +52,11 @@
           "isIosBackgroundLocationEnabled": true
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "e9f7a710-5950-421c-9108-3bc06ab70510"
+      }
+    }
   }
 }
