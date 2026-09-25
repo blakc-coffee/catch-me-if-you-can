@@ -1,7 +1,7 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { z } from "zod";
 import { RATE_LIMITS } from "../config.js";
-import { loadActor, loadGame, read, refs, requireGameActive, requirePlayer, type CallContext } from "../lib/context.js";
+import { loadActor, loadGame, loadTeam, read, refs, requireGameActive, requirePlayer, type CallContext } from "../lib/context.js";
 import { fail } from "../lib/errors.js";
 import { db } from "../lib/firebase.js";
 import { projectToCampus } from "../lib/geo.js";
@@ -77,6 +77,7 @@ export async function updateTelemetry(ctx: CallContext, raw: unknown): Promise<U
   await d.runTransaction(async (tx) => {
     requireGameActive(await loadGame(d, tx));
     const user = requirePlayer(await loadActor(d, tx, ctx.uid), ["seeker"]);
+    const team = await loadTeam(d, tx, user.teamId);
     const seeker = await read<SeekerDoc>(tx, refs.seeker(d, ctx.uid));
     const movement = checkMovement(acceptedFix(seeker), input, nowMs);
     if (movement) rejectFix(movement);
@@ -91,7 +92,7 @@ export async function updateTelemetry(ctx: CallContext, raw: unknown): Promise<U
         name: user.name,
         active: true,
         trackingEnabled: true,
-        status: speedKmh !== null && speedKmh >= TRANSIT_KMH ? "in_transit" : "active",
+        status: speedKmh !== null && speedKmh >= TRANSIT_KMH ? "IN_TRANSIT" : "ACTIVE",
         zoneId: p.zoneId,
         zoneName: p.zoneName,
         x: p.x,
@@ -99,13 +100,14 @@ export async function updateTelemetry(ctx: CallContext, raw: unknown): Promise<U
         lat: input.lat,
         lon: input.lon,
         accuracyM: input.accuracyM,
-        speedKmh,
+        speedKmh: speedKmh ?? 0,
         headingDeg: input.headingDeg ?? null,
-        battery: input.battery ?? null,
-        signal: input.signal ?? null,
+        battery: input.battery ?? 100,
+        signal: input.signal ?? "STRONG",
+        qrScannedCount: team.artifactsClaimed ?? 0,
         clientTs: input.clientTs,
         fixServerMs: nowMs,
-        lastPing: now,
+        lastPing: nowMs,
         updatedAt: now,
       },
       { merge: true },
