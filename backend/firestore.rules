@@ -10,7 +10,7 @@ rules_version = '2';
 //    are written ONLY by Cloud Functions (Admin SDK bypasses these rules).
 //  * `role` and `teamId` come from custom claims, which functions mirror from
 //    users/{uid}. Roles are lower-case: seeker, hider, surveillance, admin.
-//  * Everything not matched below is denied (teamJoinCodes, rateLimits, ...).
+//  * Everything not matched below is denied (teamJoinCodes, artifactCodes, rateLimits, ...).
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -88,6 +88,12 @@ service cloud.firestore {
     match /artifacts/{qrCode} {
       allow read: if hasRole(['admin', 'surveillance']);
       allow write: if isAdmin();
+    }
+
+    // Hashes of per-team artifact QR codes. Written only by the Admin SDK
+    // (seed / artifact-codes scripts), read only by claimArtifact.
+    match /artifactCodes/{codeKey} {
+      allow read, write: if false;
     }
 
     // Holds plaintext answers: admins only. Players read puzzlePublic.

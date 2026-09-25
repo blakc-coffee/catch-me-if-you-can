@@ -1,6 +1,6 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { z } from "zod";
-import { LIMITS, RATE_LIMITS } from "../config.js";
+import { RATE_LIMITS } from "../config.js";
 import { loadActor, loadGame, read, refs, requireGameActive, requirePlayer, type CallContext } from "../lib/context.js";
 import { fail } from "../lib/errors.js";
 import { db } from "../lib/firebase.js";
@@ -9,6 +9,7 @@ import { consumeRateLimit } from "../lib/rateLimit.js";
 import { accuracyM, epochMs, headingDeg, latitude, longitude, parseInput, speedMps } from "../lib/validation.js";
 import type { SeekerDoc } from "../models.js";
 import type { StopTrackingResponse, UpdateTelemetryResponse } from "../shared/contract.js";
+import { checkFix, checkMovement, type AcceptedFix, type FixRejection } from "./plausibility.js";
 
 const schema = z.strictObject({
   lat: latitude,
@@ -24,17 +25,34 @@ const schema = z.strictObject({
 /** Speed above which a seeker is shown as in_transit (km/h). */
 const TRANSIT_KMH = 4;
 
+function rejectFix(reason: FixRejection): never {
+  fail("failed-precondition", reason, "Fix rejected; send a newer fix.");
+}
+
+function acceptedFix(seeker: SeekerDoc | undefined): AcceptedFix | null {
+  if (!seeker || seeker.lat == null || seeker.lon == null || seeker.clientTs == null) return null;
+  const serverMs = seeker.fixServerMs ?? seeker.lastPing?.toMillis();
+  if (serverMs == null) return null;
+  return { lat: seeker.lat, lon: seeker.lon, accuracyM: seeker.accuracyM ?? 0, clientTs: seeker.clientTs, serverMs };
+}
+
 /**
  * Updates seekers/{uid} — the single "latest position" document — at most once
  * per game.telemetryMinIntervalSec. Zone and map coordinates are derived on
  * the server. History goes through uploadLocationBatch instead.
+ *
+ * A fix is rejected (see TELEMETRY_FIX_REJECTIONS) when it is stale or
+ * future-dated, too inaccurate, off campus, not newer than the last accepted
+ * fix, or implies faster movement than a person can manage. Game state, role,
+ * elimination and the previous fix are all read inside the write transaction.
+ * The first fix has no baseline and passes on the stateless checks alone.
+ * These checks make spoofing harder; they cannot prove a device's position.
  */
 export async function updateTelemetry(ctx: CallContext, raw: unknown): Promise<UpdateTelemetryResponse> {
   const input = parseInput(schema, raw);
   const nowMs = Date.now();
-  if (input.clientTs > nowMs + LIMITS.clockSkewFutureMs || input.clientTs < nowMs - LIMITS.telemetryMaxAgeMs) {
-    fail("invalid-argument", "TELEMETRY_CLOCK_SKEW", "Fix time is too far from server time; upload it as a batch.");
-  }
+  const stateless = checkFix(input, nowMs);
+  if (stateless) rejectFix(stateless);
 
   const d = db();
   const game = requireGameActive(await loadGame(d, d));
@@ -53,7 +71,12 @@ export async function updateTelemetry(ctx: CallContext, raw: unknown): Promise<U
   const speedKmh = input.speedMps === undefined ? null : Math.round(input.speedMps * 36) / 10;
 
   await d.runTransaction(async (tx) => {
+    requireGameActive(await loadGame(d, tx));
     const user = requirePlayer(await loadActor(d, tx, ctx.uid), ["seeker"]);
+    const seeker = await read<SeekerDoc>(tx, refs.seeker(d, ctx.uid));
+    const movement = checkMovement(acceptedFix(seeker), input, nowMs);
+    if (movement) rejectFix(movement);
+
     const now = FieldValue.serverTimestamp();
     tx.set(
       refs.seeker(d, ctx.uid),
@@ -77,6 +100,7 @@ export async function updateTelemetry(ctx: CallContext, raw: unknown): Promise<U
         battery: input.battery ?? null,
         signal: input.signal ?? null,
         clientTs: input.clientTs,
+        fixServerMs: nowMs,
         lastPing: now,
         updatedAt: now,
       },

@@ -2,7 +2,8 @@
  * One-off, idempotent migration of an existing seekerdb project to the
  * OpenVerse backend. Additive only — never rewrites existing names, roles,
  * teams or content:
- *   - creates game/state with defaults if missing (status from --game-status)
+ *   - creates game/state with defaults if missing (status from --game-status),
+ *     and adds an eventId to an existing game/state that has none
  *   - backfills users: playerId, status, score, eliminationTokens (and teamId: null) when missing
  *   - mirrors every puzzles/{id} into answer-free puzzlePublic/{id}
  *   - syncs custom claims {role, teamId} from each users doc
@@ -14,6 +15,7 @@ import { parseArgs } from "node:util";
 import { getAuth } from "firebase-admin/auth";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { GAME_DEFAULTS } from "../src/config.js";
+import { newEventId } from "../src/game/admin.js";
 import { withUserDefaults } from "../src/lib/context.js";
 import { COL, GAME_DOC, type PuzzleDoc, type UserDoc } from "../src/models.js";
 import { mirrorPuzzle } from "../src/puzzles/mirror.js";
@@ -46,11 +48,16 @@ const log = (msg: string) => console.log(`${dry ? "[dry-run] " : ""}${msg}`);
 
 // game/state
 const gameRef = db.collection(COL.game).doc(GAME_DOC);
-if ((await gameRef.get()).exists) {
+const gameSnap = await gameRef.get();
+if (gameSnap.exists && gameSnap.get("eventId")) {
   log("game/state exists — unchanged");
+} else if (gameSnap.exists) {
+  const eventId = newEventId();
+  log(`game/state exists — add eventId ${eventId}`);
+  if (!dry) await gameRef.update({ eventId });
 } else {
   log(`create game/state (status ${status})`);
-  if (!dry) await gameRef.create({ ...GAME_DEFAULTS, status, lastBroadcastAt: null, updatedAt: FieldValue.serverTimestamp() });
+  if (!dry) await gameRef.create({ ...GAME_DEFAULTS, status, eventId: newEventId(), lastBroadcastAt: null, updatedAt: FieldValue.serverTimestamp() });
 }
 
 // users

@@ -5,12 +5,18 @@ import { loadActor, read, refs, requireRole, type CallContext } from "../lib/con
 import { fail } from "../lib/errors.js";
 import { db } from "../lib/firebase.js";
 import { consumeRateLimit } from "../lib/rateLimit.js";
+import { randomToken } from "../lib/crypto.js";
 import { parseInput, uidSchema } from "../lib/validation.js";
 import { COL, type SeekerDoc, type UserDoc } from "../models.js";
 import type { EliminatePlayerResponse, SetGameStatusResponse } from "../shared/contract.js";
 
 const statusSchema = z.strictObject({ status: z.enum(["draft", "active", "paused", "ended"]) });
 const eliminateSchema = z.strictObject({ uid: uidSchema });
+
+/** Scopes on-device state for one event (see GameStateDTO.eventId). */
+export function newEventId(): string {
+  return `event-${randomToken(9).replace(/[^A-Za-z0-9]/g, "x")}`;
+}
 
 /**
  * ADMIN-only game lifecycle (creates game/state with defaults on first use).
@@ -28,7 +34,7 @@ export async function setGameStatus(ctx: CallContext, raw: unknown): Promise<Set
     const snap = await tx.get(refs.game(d));
     const now = FieldValue.serverTimestamp();
     if (snap.exists) tx.update(snap.ref, { status, updatedAt: now });
-    else tx.create(snap.ref, { ...GAME_DEFAULTS, status, lastBroadcastAt: null, updatedAt: now });
+    else tx.create(snap.ref, { ...GAME_DEFAULTS, status, eventId: newEventId(), lastBroadcastAt: null, updatedAt: now });
   });
 
   let seekersDeactivated = 0;

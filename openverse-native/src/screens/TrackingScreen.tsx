@@ -2,46 +2,72 @@ import { useCallback, useEffect, useState } from "react";
 import { Alert, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { AppShell } from "../components/AppShell";
 import { Card, Eyebrow, PrimaryButton } from "../components/Primitives";
-import { isTracking, startTracking, stopTracking } from "../services/locationService";
-import { clearLocations, loadLocations } from "../services/storage";
-import { deleteRemoteLocationHistory, getCallableReason, stopRemoteTracking } from "../services/firebase/callables";
-import { syncLocationQueue } from "../services/firebase/telemetrySync";
+import { isTracking } from "../services/locationService";
+import { localStore } from "../services/storage";
+import { deleteRemoteLocationHistory } from "../services/firebase/callables";
+import { sameScope, type StorageScope } from "../services/session/scope";
+import { enforceAuthorization, startTracking, stopTrackingByUser, syncLocationQueue } from "../services/session/sessionRuntime";
+import type { TrackingDecision } from "../services/session/trackingPolicy";
 import { colors } from "../theme";
 import type { AppRoute, StoredPosition } from "../types";
 
-export function TrackingScreen({ active, onTrackingChange, onNavigate }: { active: boolean; onTrackingChange: (active: boolean) => void; onNavigate: (route: AppRoute) => void }) {
+const DENIAL_MESSAGES: Record<string, string> = {
+  "game-paused": "The mission is paused. Tracking resumes when you re-enable it after the mission restarts.",
+  "game-ended": "The mission has ended. Tracking is off.",
+  "game-not-active": "The mission is not live yet.",
+  "game-missing": "The mission is not live yet.",
+  eliminated: "You have been eliminated. Tracking is off.",
+  suspended: "Your account is suspended. Tracking is off.",
+  "not-seeker": "Only seekers share their location.",
+  "no-team": "Join a seeker team before enabling tracking.",
+  "profile-missing": "Your profile is still being set up.",
+};
+
+export function TrackingScreen({ active, scope, decision, onTrackingChange, onNavigate }: { active: boolean; scope: StorageScope | null; decision: TrackingDecision; onTrackingChange: (active: boolean) => void; onNavigate: (route: AppRoute) => void }) {
   const [busy, setBusy] = useState(false);
   const [samples, setSamples] = useState<StoredPosition[]>([]);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    onTrackingChange(await isTracking());
-    const queued = await loadLocations();
-    setSamples(queued);
-    if (queued.length > 0) {
-      try {
-        const result = await syncLocationQueue();
-        setSamples(await loadLocations());
-        setSyncMessage(result.uploaded > 0 ? `${result.uploaded} location samples synced.` : null);
-      } catch (error) {
-        const reason = getCallableReason(error);
-        setSyncMessage(reason === "GAME_NOT_ACTIVE" ? "Locations are queued until the mission starts." : "Locations are safely queued for the next sync.");
-      }
+    if (!scope) {
+      setSamples([]);
+      onTrackingChange(false);
+      return;
     }
-  }, [onTrackingChange]);
+    const activeScope = await localStore.getActiveScope();
+    onTrackingChange(Boolean(activeScope?.collecting && sameScope(activeScope, scope) && (await isTracking())));
+    const queued = await localStore.loadLocations(scope);
+    setSamples(queued);
+    if (queued.length === 0) return;
+    try {
+      const result = await syncLocationQueue(scope, decision);
+      setSamples(await localStore.loadLocations(scope));
+      if (result.status === "denied") {
+        await enforceAuthorization(scope, { allowed: false, reason: result.denial });
+        onTrackingChange(false);
+        setSyncMessage(DENIAL_MESSAGES[result.denial] ?? "Tracking is off.");
+      } else if (result.status === "skipped") {
+        setSyncMessage("Locations stay on this phone until you are an active seeker in a live mission.");
+      } else {
+        setSyncMessage(result.uploaded > 0 ? `${result.uploaded} location samples synced.` : null);
+      }
+    } catch {
+      setSyncMessage("Locations are safely queued for the next sync.");
+    }
+  }, [decision, onTrackingChange, scope]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 
   const toggleTracking = async () => {
+    if (!scope) return;
     setBusy(true);
     try {
       if (active) {
-        await stopTracking();
-        await syncLocationQueue().catch(() => undefined);
-        await stopRemoteTracking().catch(() => undefined);
+        await syncLocationQueue(scope, decision).catch(() => undefined);
+        await stopTrackingByUser();
         onTrackingChange(false);
       } else {
-        const result = await startTracking();
+        const result = await startTracking(scope, decision);
         if (result.ok) {
           onTrackingChange(true);
         } else if (result.reason === "background-denied") {
@@ -49,8 +75,12 @@ export function TrackingScreen({ active, onTrackingChange, onNavigate }: { activ
             { text: "Cancel", style: "cancel" },
             { text: "Open settings", onPress: () => void Linking.openSettings() }
           ]);
+        } else if (result.reason === "unavailable") {
+          Alert.alert("Location unavailable", "Install a development or release build to test background tracking. It is not available in Expo Go.");
+        } else if (result.reason === "foreground-denied") {
+          Alert.alert("Location unavailable", "Foreground location permission was not granted.");
         } else {
-          Alert.alert("Location unavailable", result.reason === "unavailable" ? "Install a development or release build to test background tracking. It is not available in Expo Go." : "Foreground location permission was not granted.");
+          Alert.alert("Tracking unavailable", DENIAL_MESSAGES[result.reason] ?? "Tracking is only available to active seekers during a live mission.");
         }
       }
     } finally {
@@ -60,13 +90,14 @@ export function TrackingScreen({ active, onTrackingChange, onNavigate }: { activ
   };
 
   const clearHistory = () => {
+    if (!scope) return;
     Alert.alert("Clear location history?", "This permanently removes the route stored on this phone and in Firebase.", [
       { text: "Cancel", style: "cancel" },
       { text: "Clear", style: "destructive", onPress: async () => {
         setBusy(true);
         try {
           await deleteRemoteLocationHistory();
-          await clearLocations();
+          await localStore.clearLocations(scope);
           setSamples([]);
           setSyncMessage("Location history deleted.");
         } catch {
@@ -94,8 +125,9 @@ export function TrackingScreen({ active, onTrackingChange, onNavigate }: { activ
       </Card>
 
       {syncMessage ? <Text style={styles.syncMessage}>{syncMessage}</Text> : null}
+      {!active && decision.allowed === false ? <Text style={styles.syncMessage}>{DENIAL_MESSAGES[decision.reason] ?? "Tracking is only available to active seekers during a live mission."}</Text> : null}
 
-      <PrimaryButton loading={busy} onPress={toggleTracking}>{active ? "Stop background tracking" : "Enable background tracking"}</PrimaryButton>
+      <PrimaryButton loading={busy} disabled={!active && decision.allowed !== true} onPress={toggleTracking}>{active ? "Stop background tracking" : "Enable background tracking"}</PrimaryButton>
 
       <Card style={styles.notice}>
         <Text style={styles.noticeTitle}>Android permission flow</Text>

@@ -4,7 +4,7 @@
  * part of that schema and keep their names; everything else is added and owned
  * by Cloud Functions.
  *
- * Collections not readable by any client: teamJoinCodes, rateLimits.
+ * Collections not readable by any client: teamJoinCodes, artifactCodes, rateLimits.
  * `puzzles` (holds plaintext answers) is readable only by admins, as before;
  * players read the answer-free mirror in `puzzlePublic`.
  */
@@ -28,6 +28,7 @@ export const COL = {
   puzzleClaims: "puzzleClaims",
   broadcasts: "broadcasts",
   teamJoinCodes: "teamJoinCodes",
+  artifactCodes: "artifactCodes",
   rateLimits: "rateLimits",
 } as const;
 
@@ -130,6 +131,8 @@ export interface SolvedBy {
 /** game/state — single game configuration. */
 export interface GameDoc {
   status: GameStatus;
+  /** Scopes on-device state; clients treat a missing value as DEFAULT_EVENT_ID. */
+  eventId?: string;
   telemetryMinIntervalSec: number;
   broadcastCooldownSec: number;
   staleAfterSec: number;
@@ -159,6 +162,8 @@ export interface SeekerDoc {
   signal: Signal | null;
   trackingEnabled: boolean;
   clientTs: number | null;
+  /** Server epoch ms when the current live fix was accepted (baseline for plausibility checks). */
+  fixServerMs?: number | null;
   lastPing: Timestamp | null;
   updatedAt: Timestamp;
 }
@@ -195,6 +200,18 @@ export interface ArtifactClaimDoc {
   playerId: string;
   points: number;
   claimedAt: Timestamp;
+}
+
+/**
+ * artifactCodes/{sha256(code)} — a per-team QR code for one artifact. The
+ * printed code is a high-entropy bearer secret redeemable only by `teamId`;
+ * only its hash is stored. Server-only (no client access).
+ */
+export interface ArtifactCodeDoc {
+  artifactId: string;
+  teamId: string;
+  isActive: boolean;
+  createdAt: Timestamp;
 }
 
 /** puzzleUnlocks/{teamId_puzzleId} — lets the team read puzzlePublic/{puzzleId}. */

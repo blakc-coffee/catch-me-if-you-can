@@ -75,6 +75,7 @@ beforeEach(async () => {
   w.set(d.doc("broadcasts/bc1"), { seekerPositions: [] });
   w.set(d.doc("teamJoinCodes/def"), { teamId: ALPHA, active: true });
   w.set(d.doc("rateLimits/k"), { count: 1, windowStartMs: 0 });
+  w.set(d.doc("artifactCodes/hash1"), { artifactId: "QR-KEY-001", teamId: ALPHA, isActive: true });
   await w.commit();
 });
 
@@ -266,6 +267,16 @@ describe("server-only secrets", () => {
       await assertFails(getDoc(doc(f, "teamJoinCodes/def")));
       await assertFails(getDocs(collection(f, "teamJoinCodes")));
       await assertFails(getDoc(doc(f, "rateLimits/k")));
+    }
+  });
+
+  it("per-team artifact codes are unreadable and unwritable by every role, including the owning team", async () => {
+    for (const [uid, role] of [["s1", "seeker"], ["s2", "seeker"], ["h1", "hider"], ["surv", "surveillance"], ["adm", "admin"]] as const) {
+      const f = as(uid, role);
+      await assertFails(getDoc(doc(f, "artifactCodes/hash1")));
+      await assertFails(getDocs(collection(f, "artifactCodes")));
+      await assertFails(setDoc(doc(f, "artifactCodes/forged"), { artifactId: "QR-KEY-001", teamId: ALPHA, isActive: true }));
+      await assertFails(updateDoc(doc(f, "artifactCodes/hash1"), { teamId: BRAVO }));
     }
   });
 });

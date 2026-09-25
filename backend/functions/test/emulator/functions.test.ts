@@ -11,11 +11,15 @@ import { submitPuzzleAnswer } from "../../src/puzzles/submitPuzzleAnswer.js";
 import { joinTeam } from "../../src/teams/joinTeam.js";
 import { deleteLocationHistory, uploadLocationBatch } from "../../src/telemetry/locationBatches.js";
 import { stopTracking, updateTelemetry } from "../../src/telemetry/updateTelemetry.js";
-import type { SeededArtifact } from "../../scripts/seedGame.js";
+import { provisionArtifactCodes, type SeededArtifact } from "../../scripts/seedGame.js";
+import { artifactCodeKey, newArtifactCode } from "../../src/lib/normalize.js";
 import { CODES, docData, expectReason, makeUser, onCampus, resetEmulators, seed } from "./helpers.js";
 
 let qr: Map<string, SeededArtifact>;
-const code = (key: string) => qr.get(key)!.qrCode;
+/** Artifact doc id — the old static QR value, no longer redeemable. */
+const artifactId = (key: string) => qr.get(key)!.qrCode;
+/** The per-team QR code printed for `team`. */
+const code = (key: string, team = "alpha") => qr.get(key)!.teamCodes[team]!;
 const fix = (extra: Record<string, unknown> = {}) => ({ ...onCampus, accuracyM: 6, battery: 80, signal: "GOOD", clientTs: Date.now(), ...extra });
 const seeker = (team = "alpha", name?: string) => makeUser("seeker", team, name);
 const hider = (team = "ghost", name?: string) => makeUser("hider", team, name);
@@ -39,16 +43,20 @@ describe("compatibility with existing seekerdb documents", () => {
     expect(await docData(`users/${rec.uid}`)).toMatchObject({ name: "Seeker One", role: "seeker", teamId: "alpha", playerId: res.profile.playerId });
   });
 
-  it("claims an artifact keyed by its printed QR code and solves a plaintext-answer puzzle", async () => {
+  it("no longer redeems a legacy static QR code; a per-team code for the same artifact claims it and solves a plaintext-answer puzzle", async () => {
     const now = Timestamp.now();
     await db().doc("puzzles/croJmpXUZnLSYZCYKEH7").set({ title: "Puzzle 1", question: "Sample question", answer: "Secret", createdAt: now });
     await mirrorPuzzle(db(), "croJmpXUZnLSYZCYKEH7", (await db().doc("puzzles/croJmpXUZnLSYZCYKEH7").get()).data());
     await db().doc("artifacts/QR-KEY-001").set({ qrCode: "QR-KEY-001", qrType: "correct", name: "Golden Key", description: "The real artifact", areaId: "academic-1", puzzleId: "croJmpXUZnLSYZCYKEH7", redirectUrl: null, isActive: true, createdAt: now });
     await db().doc("artifacts/QR-DECOY-001").set({ qrCode: "QR-DECOY-001", qrType: "wrong", name: "Decoy Key", description: "A decoy artifact", areaId: "academic-1", puzzleId: null, redirectUrl: "https://example.com/wrong", isActive: true, createdAt: now });
+    const { issued } = await provisionArtifactCodes(db(), ["QR-KEY-001", "QR-DECOY-001"], ["alpha", "bravo"]);
+    const issuedCode = (artifact: string, team: string) => issued.find((c) => c.artifactId === artifact && c.teamId === team)!.code;
 
     const s = await seeker();
-    await expect(claimArtifact(s, { payload: "QR-DECOY-001" })).resolves.toEqual({ status: "DECOY", artifactId: "QR-DECOY-001", name: "Decoy Key", redirectUrl: "https://example.com/wrong" });
-    const claimed = await claimArtifact(s, { payload: "QR-KEY-001" });
+    await expectReason(claimArtifact(s, { payload: "QR-KEY-001" }), "INVALID_ARTIFACT_CODE");
+    await expectReason(claimArtifact(s, { payload: "QR-DECOY-001" }), "INVALID_ARTIFACT_CODE");
+    await expect(claimArtifact(s, { payload: issuedCode("QR-DECOY-001", "alpha") })).resolves.toEqual({ status: "DECOY", artifactId: "QR-DECOY-001", name: "Decoy Key", redirectUrl: "https://example.com/wrong" });
+    const claimed = await claimArtifact(s, { payload: issuedCode("QR-KEY-001", "alpha") });
     expect(claimed).toMatchObject({ status: "CLAIMED", points: 25, puzzle: { puzzleId: "croJmpXUZnLSYZCYKEH7", title: "Puzzle 1", question: "Sample question" } });
     await expect(submitPuzzleAnswer(s, { puzzleId: "croJmpXUZnLSYZCYKEH7", answer: " SECRET " })).resolves.toMatchObject({ status: "SOLVED", pointsAwarded: 100, tokensAwarded: 1 });
     const pub = await docData<Record<string, unknown>>("puzzlePublic/croJmpXUZnLSYZCYKEH7");
@@ -108,12 +116,69 @@ describe("profiles, roles and teams", () => {
 });
 
 describe("updateTelemetry", () => {
-  it("writes the latest position with server-derived zone and server timestamp", async () => {
+  /** Stores an accepted live fix `secondsAgo` in the past, as updateTelemetry would have. */
+  async function priorFix(uid: string, secondsAgo: number, at: { lat: number; lon: number } = onCampus, clientSecondsAgo = secondsAgo) {
+    const ms = Date.now() - secondsAgo * 1000;
+    await db().doc(`seekers/${uid}`).set({
+      uid, teamId: "alpha", playerId: "OP-TEST", name: "Prior", active: true, trackingEnabled: true, status: "active",
+      lat: at.lat, lon: at.lon, accuracyM: 6, clientTs: Date.now() - clientSecondsAgo * 1000, fixServerMs: ms,
+      lastPing: Timestamp.fromMillis(ms), updatedAt: Timestamp.fromMillis(ms),
+    });
+  }
+  const sports = { lat: 9.754, lon: 76.649392 };
+  const dining = { lat: 9.755678, lon: 76.650101 };
+  /** `meters` north of onCampus. */
+  const north = (meters: number) => ({ lat: onCampus.lat + meters / 111_195, lon: onCampus.lon });
+
+  it("accepts the first fix and writes the latest position with server-derived zone and server timestamp", async () => {
     const s = await seeker("alpha", "Echo");
     await expect(updateTelemetry(s, fix({ speedMps: 2 }))).resolves.toMatchObject({ zoneId: "academic_1", inBounds: true });
     const doc = await docData<Record<string, unknown>>(`seekers/${s.uid}`);
     expect(doc).toMatchObject({ active: true, teamId: "alpha", name: "Echo", zoneId: "academic_1", status: "in_transit", speedKmh: 7.2 });
     expect(doc!.lastPing).toBeInstanceOf(Timestamp);
+    expect(Math.abs((doc!.fixServerMs as number) - Date.now())).toBeLessThan(10_000);
+  });
+
+  it("accepts ordinary movement from the previous accepted fix", async () => {
+    const s = await seeker();
+    await priorFix(s.uid, 30);
+    await expect(updateTelemetry(s, fix(north(150)))).resolves.toMatchObject({ inBounds: true });
+    expect(await docData(`seekers/${s.uid}`)).toMatchObject({ lat: north(150).lat });
+  });
+
+  it("rejects an impossible jump and keeps the previous position", async () => {
+    const s = await seeker();
+    await priorFix(s.uid, 10, sports);
+    await expectReason(updateTelemetry(s, fix(dining)), "TELEMETRY_IMPLAUSIBLE_MOVEMENT");
+    expect(await docData(`seekers/${s.uid}`)).toMatchObject({ lat: sports.lat, lon: sports.lon });
+  });
+
+  it("rejects a jump hidden behind a backdated previous fix and a future-dated new fix", async () => {
+    const s = await seeker();
+    // Previous fix claimed to be 55 s old but reached the server 10 s ago; the new
+    // one claims to be 25 s in the future. ~200 m would pass over a claimed 80 s.
+    await priorFix(s.uid, 10, sports, 55);
+    await expectReason(updateTelemetry(s, fix({ ...dining, clientTs: Date.now() + 25_000 })), "TELEMETRY_IMPLAUSIBLE_MOVEMENT");
+  });
+
+  it("rejects stale, future and non-monotonic timestamps", async () => {
+    const s = await seeker();
+    await expectReason(updateTelemetry(s, fix({ clientTs: Date.now() - 5 * 60_000 })), "TELEMETRY_STALE_FIX");
+    await expectReason(updateTelemetry(s, fix({ clientTs: Date.now() + 5 * 60_000 })), "TELEMETRY_FUTURE_FIX");
+    await priorFix(s.uid, 5);
+    const prev = (await docData<{ clientTs: number }>(`seekers/${s.uid}`))!.clientTs;
+    await expectReason(updateTelemetry(s, fix({ clientTs: prev })), "TELEMETRY_NON_MONOTONIC");
+    const s2 = await seeker();
+    await priorFix(s2.uid, 5);
+    await expectReason(updateTelemetry(s2, fix({ clientTs: Date.now() - 20_000 })), "TELEMETRY_NON_MONOTONIC");
+  });
+
+  it("rejects unacceptable accuracy and out-of-campus coordinates without writing", async () => {
+    const s = await seeker();
+    await expectReason(updateTelemetry(s, fix({ accuracyM: 120 })), "TELEMETRY_LOW_ACCURACY");
+    await expectReason(updateTelemetry(s, fix({ lat: 9.76, lon: 76.65 })), "TELEMETRY_OUT_OF_BOUNDS");
+    await expectReason(updateTelemetry(s, fix({ lat: 0, lon: 0 })), "TELEMETRY_OUT_OF_BOUNDS");
+    expect(await docData(`seekers/${s.uid}`)).toBeUndefined();
   });
 
   it("enforces role, team and throttle", async () => {
@@ -134,13 +199,33 @@ describe("updateTelemetry", () => {
     expect(await docData(`seekers/${s.uid}`)).toMatchObject({ active: false, status: "eliminated" });
   });
 
-  it("stopTracking hides the seeker until the next accepted update", async () => {
+  it("refuses after role loss, suspension, pause and game end", async () => {
+    const admin = await makeUser("admin");
+    const moved = await seeker();
+    await assignUser(admin, { uid: moved.uid, role: "hider", teamId: "ghost" });
+    await expectReason(updateTelemetry(moved, fix()), "ROLE_NOT_ALLOWED");
+
+    const suspended = await seeker();
+    await db().doc(`users/${suspended.uid}`).update({ status: "suspended" });
+    await expectReason(updateTelemetry(suspended, fix()), "ACCOUNT_SUSPENDED");
+
+    const s = await seeker();
+    await setGameStatus(admin, { status: "paused" });
+    await expectReason(updateTelemetry(s, fix()), "GAME_NOT_ACTIVE");
+    await setGameStatus(admin, { status: "ended" });
+    await expectReason(updateTelemetry(s, fix()), "GAME_ENDED");
+    expect(await docData(`seekers/${s.uid}`)).toBeUndefined();
+  });
+
+  it("stopTracking hides the seeker until the next accepted update, keeping the movement baseline", async () => {
     await resetEmulators();
     qr = await seed({ telemetryMinIntervalSec: 1 });
     const s = await seeker();
     await updateTelemetry(s, fix());
     await expect(stopTracking(s, {})).resolves.toEqual({ trackingEnabled: false });
     expect(await docData(`seekers/${s.uid}`)).toMatchObject({ active: false, trackingEnabled: false, status: "offline" });
+    await new Promise((r) => setTimeout(r, 1_100));
+    await expectReason(updateTelemetry(s, fix(dining)), "TELEMETRY_IMPLAUSIBLE_MOVEMENT");
     await new Promise((r) => setTimeout(r, 1_100));
     await updateTelemetry(s, fix());
     expect(await docData(`seekers/${s.uid}`)).toMatchObject({ active: true });
@@ -190,11 +275,52 @@ describe("uploadLocationBatch", () => {
 });
 
 describe("claimArtifact", () => {
-  it("rejects malformed and unknown codes identically", async () => {
+  it("rejects malformed, unknown and legacy static codes identically", async () => {
     const s = await seeker();
     await expectReason(claimArtifact(s, { payload: "https://evil.example/qr" }), "INVALID_ARTIFACT_CODE");
     await expectReason(claimArtifact(s, { payload: "OV-does-not-exist" }), "INVALID_ARTIFACT_CODE");
     await expectReason(claimArtifact(s, { payload: ".." }), "INVALID_ARTIFACT_CODE");
+    await expectReason(claimArtifact(s, { payload: newArtifactCode() }), "INVALID_ARTIFACT_CODE");
+    await expectReason(claimArtifact(s, { payload: `${code("a01")}x` }), "INVALID_ARTIFACT_CODE");
+    // The artifact id (what a static printed QR used to hold) is not redeemable.
+    await expectReason(claimArtifact(s, { payload: artifactId("a01") }), "INVALID_ARTIFACT_CODE");
+    expect((await db().collection("artifactClaims").get()).size).toBe(0);
+  });
+
+  it("rejects another team's code — a photographed or shared QR — and leaves it valid for its owner", async () => {
+    const alpha = await seeker("alpha");
+    const bravoCode = code("a07", "bravo");
+    await expectReason(claimArtifact(alpha, { payload: bravoCode }), "INVALID_ARTIFACT_CODE");
+    expect((await docData("teams/alpha"))?.artifactsClaimed ?? 0).toBe(0);
+    expect((await db().collection("artifactClaims").get()).size).toBe(0);
+    await expect(claimArtifact(await seeker("bravo"), { payload: bravoCode })).resolves.toMatchObject({ status: "CLAIMED" });
+    // After bravo redeemed it, it is still worthless to alpha.
+    await expectReason(claimArtifact(alpha, { payload: bravoCode }), "INVALID_ARTIFACT_CODE");
+  });
+
+  it("does not reveal decoys through another team's code", async () => {
+    await expectReason(claimArtifact(await seeker("alpha"), { payload: code("d01", "bravo") }), "INVALID_ARTIFACT_CODE");
+  });
+
+  it("issues one active code per artifact and seeker team, stored only as a hash", async () => {
+    const docs = (await db().collection("artifactCodes").get()).docs;
+    expect(docs).toHaveLength(17 * 2);
+    expect(new Set(docs.map((d) => d.get("teamId")))).toEqual(new Set(["alpha", "bravo"]));
+    const plain = code("a01");
+    expect(docs.some((d) => d.id === artifactCodeKey(plain))).toBe(true);
+    expect(JSON.stringify(docs.map((d) => d.data()))).not.toContain(plain.slice(4));
+  });
+
+  it("keeps issued codes on re-seed and invalidates them on rotation", async () => {
+    const old = code("a08");
+    const reseeded = await seed();
+    expect(reseeded.get("a08")!.teamCodes).toEqual({});
+    await expect(claimArtifact(await seeker("alpha"), { payload: old })).resolves.toMatchObject({ status: "CLAIMED" });
+
+    const bravoOld = code("a09", "bravo");
+    const { issued } = await provisionArtifactCodes(db(), [artifactId("a09")], ["bravo"], { rotate: true });
+    await expectReason(claimArtifact(await seeker("bravo"), { payload: bravoOld }), "INVALID_ARTIFACT_CODE");
+    await expect(claimArtifact(await seeker("bravo"), { payload: issued[0]!.code })).resolves.toMatchObject({ status: "CLAIMED" });
   });
 
   it("claims once per team, atomically updating claim, unlock, team and player", async () => {
@@ -203,17 +329,17 @@ describe("claimArtifact", () => {
     expect(r).toMatchObject({ status: "CLAIMED", name: "Artifact 11", points: 25, teamArtifactsClaimed: 1, totalArtifacts: 15, puzzle: { puzzleId: "case-01", title: "The Programmer" } });
     expect(await docData("teams/alpha")).toMatchObject({ artifactsClaimed: 1, score: 25 });
     expect(await docData(`users/${s.uid}`)).toMatchObject({ score: 25 });
-    expect(await docData("puzzleUnlocks/alpha_case-01")).toMatchObject({ teamId: "alpha", artifactId: code("a11") });
+    expect(await docData("puzzleUnlocks/alpha_case-01")).toMatchObject({ teamId: "alpha", artifactId: artifactId("a11") });
   });
 
   it("fails duplicate claims — also from a teammate — without changing progress", async () => {
     const [a, b] = [await seeker("alpha"), await seeker("alpha")];
     await claimArtifact(a, { payload: code("a01") });
     const err = await expectReason(claimArtifact(b, { payload: ` ${code("a01")}\n` }), "ARTIFACT_ALREADY_CLAIMED");
-    expect(err.details).toMatchObject({ artifactId: code("a01") });
+    expect(err.details).toMatchObject({ artifactId: artifactId("a01") });
     expect(await docData("teams/alpha")).toMatchObject({ artifactsClaimed: 1, score: 25 });
-    // Another team can still claim it.
-    await expect(claimArtifact(await seeker("bravo"), { payload: code("a01") })).resolves.toMatchObject({ status: "CLAIMED", teamArtifactsClaimed: 1 });
+    // Another team claims the same artifact with its own code.
+    await expect(claimArtifact(await seeker("bravo"), { payload: code("a01", "bravo") })).resolves.toMatchObject({ status: "CLAIMED", teamArtifactsClaimed: 1 });
   });
 
   it("is idempotent under concurrent scans by the whole team", async () => {
@@ -223,19 +349,30 @@ describe("claimArtifact", () => {
     expect(await docData("teams/alpha")).toMatchObject({ artifactsClaimed: 1, score: 25 });
   });
 
+  it("awards only the owning team under concurrent redemption of a shared code", async () => {
+    const [owner, thief1, thief2] = [await seeker("bravo"), await seeker("alpha"), await seeker("alpha")];
+    const shared = code("a10", "bravo");
+    const results = await Promise.allSettled([owner, thief1, thief2].map((s) => claimArtifact(s, { payload: shared })));
+    expect(results.map((r) => r.status)).toEqual(["fulfilled", "rejected", "rejected"]);
+    expect((await docData("teams/alpha"))?.score ?? 0).toBe(0);
+    expect(await docData("teams/bravo")).toMatchObject({ artifactsClaimed: 1, score: 25 });
+  });
+
   it("returns DECOY with the redirect for wrong codes and awards nothing", async () => {
     const s = await seeker();
     await expect(claimArtifact(s, { payload: code("d01") })).resolves.toMatchObject({ status: "DECOY", name: "Decoy Key", redirectUrl: "https://example.com/wrong" });
     expect((await docData("teams/alpha"))?.score ?? 0).toBe(0);
   });
 
-  it("refuses hiders, team-less seekers, eliminated players, inactive codes and ended games", async () => {
+  it("refuses hiders, team-less seekers, eliminated players, revoked codes, inactive artifacts and ended games", async () => {
     await expectReason(claimArtifact(await hider(), { payload: code("a03") }), "ROLE_NOT_ALLOWED");
     await expectReason(claimArtifact(await makeUser("seeker"), { payload: code("a03") }), "NO_TEAM");
     const s = await seeker();
     await eliminatePlayer(await makeUser("surveillance"), { uid: s.uid });
     await expectReason(claimArtifact(s, { payload: code("a03") }), "PLAYER_ELIMINATED");
-    await db().doc(`artifacts/${code("a04")}`).update({ isActive: false });
+    await db().doc(`artifactCodes/${artifactCodeKey(code("a12"))}`).update({ isActive: false });
+    await expectReason(claimArtifact(await seeker(), { payload: code("a12") }), "INVALID_ARTIFACT_CODE");
+    await db().doc(`artifacts/${artifactId("a04")}`).update({ isActive: false });
     await expectReason(claimArtifact(await seeker(), { payload: code("a04") }), "INVALID_ARTIFACT_CODE");
     const s2 = await seeker();
     await setGameStatus(await makeUser("admin"), { status: "ended" });

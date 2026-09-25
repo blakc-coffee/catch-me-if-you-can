@@ -25,7 +25,7 @@ export function ScannerScreen({ onNavigate, onScanned }: { onNavigate: (route: A
       .then(setResult)
       .catch((scanError) => {
         const reason = getCallableReason(scanError);
-        setError(reason === "INVALID_ARTIFACT_CODE" ? "This QR code is not a valid Openverse artifact." : "Artifact verification failed. Check your connection and try again.");
+        setError(reason === "INVALID_ARTIFACT_CODE" ? "This QR code is not a valid artifact for your team." : "Artifact verification failed. Check your connection and try again.");
       })
       .finally(() => setVerifying(false));
   }, [onScanned, payload]);

@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  ARTIFACT_CODE_PATTERN,
   QR_PAYLOAD_PATTERN,
   answerMatches,
+  artifactCodeKey,
   artifactKey,
   joinCodeKey,
   normalizeAnswer,
   normalizeJoinCode,
+  newArtifactCode,
   splitAcceptedAnswers,
 } from "../../src/lib/normalize.js";
 
@@ -69,5 +72,26 @@ describe("QR payloads", () => {
     expect(artifactKey("QR-KEY-001")).toMatch(/^[0-9a-f]{32}$/);
     expect(artifactKey("QR-KEY-001")).toBe(artifactKey("QR-KEY-001"));
     expect(artifactKey("QR-KEY-001")).not.toBe(artifactKey("QR-KEY-002"));
+  });
+});
+
+describe("per-team artifact codes", () => {
+  it("are high-entropy, well-formed and unique", () => {
+    const codes = new Set(Array.from({ length: 1000 }, () => newArtifactCode()));
+    expect(codes.size).toBe(1000);
+    for (const c of codes) expect(ARTIFACT_CODE_PATTERN.test(c)).toBe(true);
+  });
+
+  it("are never confused with artifact doc ids or malformed payloads", () => {
+    for (const bad of ["QR-KEY-001", "OV-a1B2_c3D4-e5F6g7", "OVT-short", `OVT-${"a".repeat(33)}`, `ovt-${"a".repeat(32)}`, `OVT-${"a".repeat(31)}/`, ""]) {
+      expect(ARTIFACT_CODE_PATTERN.test(bad)).toBe(false);
+    }
+  });
+
+  it("are stored only as a hash", () => {
+    const code = newArtifactCode();
+    expect(artifactCodeKey(code)).toMatch(/^[0-9a-f]{64}$/);
+    expect(artifactCodeKey(code)).not.toContain(code.slice(4));
+    expect(artifactCodeKey(code)).not.toBe(artifactCodeKey(newArtifactCode()));
   });
 });

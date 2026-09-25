@@ -1,6 +1,7 @@
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
-import { LOCATION_TASK_NAME } from "./backgroundLocationTask";
+
+export const LOCATION_TASK_NAME = "openverse-background-location";
 
 export type TrackingPermissionResult =
   | { ok: true }
@@ -10,7 +11,8 @@ export async function isTracking(): Promise<boolean> {
   return TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
 }
 
-export async function startTracking(): Promise<TrackingPermissionResult> {
+/** Requests permissions and starts the OS task. Use session startTracking, which checks authorization first. */
+export async function startLocationUpdates(): Promise<TrackingPermissionResult> {
   if (!(await TaskManager.isAvailableAsync())) {
     return { ok: false, reason: "unavailable" };
   }
@@ -46,7 +48,8 @@ export async function startTracking(): Promise<TrackingPermissionResult> {
   return { ok: true };
 }
 
-export async function stopTracking(): Promise<void> {
+/** Stops the OS task. Use session shutdownTracking, which also stops collection and cleans up. */
+export async function stopLocationUpdates(): Promise<void> {
   if (await isTracking()) {
     await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
   }

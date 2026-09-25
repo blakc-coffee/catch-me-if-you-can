@@ -6,7 +6,7 @@ import { COL, type PuzzleDoc } from "../models.js";
 import { mirrorPuzzle } from "./mirror.js";
 import { submitPuzzleAnswer as submitPuzzleAnswerHandler } from "./submitPuzzleAnswer.js";
 
-export const submitPuzzleAnswer = callable("submitPuzzleAnswer", submitPuzzleAnswerHandler);
+export const submitPuzzleAnswer = callable("submitPuzzleAnswer", submitPuzzleAnswerHandler, { sensitive: true });
 
 /**
  * Keeps puzzlePublic/{id} (answer-free) in sync with admin edits to puzzles/{id}.

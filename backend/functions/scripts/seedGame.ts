@@ -1,24 +1,29 @@
 /**
  * Game provisioning in the seekerdb schema, shared by the seed CLI and the
  * emulator tests. Writes teams, areas, puzzles (+ answer-free puzzlePublic
- * mirrors), artifacts keyed by their QR code, hashed team join codes and the
- * game/state doc. Artifact QR codes are random and stable across re-seeds
- * (matched by `seedKey`), so printed codes stay valid. Existing counters and
- * solve state are preserved.
+ * mirrors), artifacts, hashed team join codes, hashed per-team artifact codes
+ * and the game/state doc. Artifact ids are random and stable across re-seeds
+ * (matched by `seedKey`). Per-team artifact codes already issued are kept (so
+ * printed codes stay valid) unless `rotateArtifactCodes` is set; only codes
+ * created by this run are returned in plaintext. Existing counters and solve
+ * state are preserved.
  */
 import { FieldValue, type Firestore } from "firebase-admin/firestore";
 import { z } from "zod";
 import { GAME_DEFAULTS } from "../src/config.js";
 import { randomToken } from "../src/lib/crypto.js";
-import { joinCodeKey, splitAcceptedAnswers } from "../src/lib/normalize.js";
+import { artifactCodeKey, joinCodeKey, newArtifactCode, splitAcceptedAnswers } from "../src/lib/normalize.js";
 import { resourceId } from "../src/lib/validation.js";
 import { COL, GAME_DOC } from "../src/models.js";
+import { newEventId } from "../src/game/admin.js";
 import { mirrorPuzzle } from "../src/puzzles/mirror.js";
 import { ROLES } from "../src/shared/contract.js";
 
 export const seedDataSchema = z.strictObject({
   game: z.strictObject({
     status: z.enum(["draft", "active", "paused", "ended"]),
+    /** Scopes on-device state; change it for a new event. Generated once when omitted. */
+    eventId: z.string().regex(/^[A-Za-z0-9-]{1,64}$/).optional(),
     telemetryMinIntervalSec: z.number().int().min(1).max(600).default(GAME_DEFAULTS.telemetryMinIntervalSec),
     broadcastCooldownSec: z.number().int().min(1).max(86_400).default(GAME_DEFAULTS.broadcastCooldownSec),
     staleAfterSec: z.number().int().min(30).max(86_400).default(GAME_DEFAULTS.staleAfterSec),
@@ -49,7 +54,7 @@ export const seedDataSchema = z.strictObject({
   artifacts: z.array(
     z.strictObject({
       key: z.string().regex(/^[A-Za-z0-9-]{1,40}$/),
-      /** Optional fixed QR value; otherwise a random code is generated once. */
+      /** Optional fixed artifact id; otherwise a random id is generated once. Not redeemable. */
       qrCode: z.string().regex(/^[A-Za-z0-9._:-]{3,128}$/).optional(),
       name: z.string().min(1).max(80),
       description: z.string().max(500),
@@ -66,18 +71,80 @@ export type SeedData = z.input<typeof seedDataSchema>;
 
 export interface SeededArtifact {
   key: string;
+  /** Artifact doc id (identifies the artifact; not redeemable). */
   qrCode: string;
   name: string;
   qrType: "correct" | "wrong";
   puzzleId: string | null;
+  /** Per-team QR codes created by this run, by seeker team id. */
+  teamCodes: Record<string, string>;
 }
 
-/** QR values for printing: "OV-" + 16 random base64url chars. */
+/** A newly issued per-team artifact code, for printing. */
+export interface IssuedArtifactCode {
+  artifactId: string;
+  teamId: string;
+  code: string;
+}
+
+/** Artifact doc ids: "OV-" + 16 random base64url chars. */
 export function newQrCode(): string {
   return `OV-${randomToken(12)}`;
 }
 
-export async function seedGame(db: Firestore, raw: SeedData): Promise<{ artifacts: SeededArtifact[] }> {
+/**
+ * Ensures every (artifact, seeker team) pair has one active artifact code.
+ * Pairs that already have one keep it; `rotate` deactivates existing codes
+ * and issues new ones. Only hashes are stored; the returned plaintext codes
+ * are the only copy and must go to the git-ignored seed-output.
+ */
+export async function provisionArtifactCodes(
+  db: Firestore,
+  artifactIds: readonly string[],
+  teamIds: readonly string[],
+  { rotate = false, dryRun = false }: { rotate?: boolean; dryRun?: boolean } = {},
+): Promise<{ issued: IssuedArtifactCode[]; kept: number; deactivated: number }> {
+  const pair = (artifactId: string, teamId: string) => `${artifactId}|${teamId}`;
+  const existing = await db.collection(COL.artifactCodes).where("isActive", "==", true).get();
+  const active = new Set<string>();
+  const writer = dryRun ? null : db.bulkWriter();
+  let deactivated = 0;
+  for (const doc of existing.docs) {
+    const key = pair(String(doc.get("artifactId")), String(doc.get("teamId")));
+    if (rotate) {
+      deactivated += 1;
+      void writer?.update(doc.ref, { isActive: false, deactivatedAt: FieldValue.serverTimestamp() });
+    } else {
+      active.add(key);
+    }
+  }
+  const issued: IssuedArtifactCode[] = [];
+  let kept = 0;
+  for (const artifactId of artifactIds) {
+    for (const teamId of teamIds) {
+      if (active.has(pair(artifactId, teamId))) {
+        kept += 1;
+        continue;
+      }
+      const code = newArtifactCode();
+      issued.push({ artifactId, teamId, code });
+      void writer?.create(db.collection(COL.artifactCodes).doc(artifactCodeKey(code)), {
+        artifactId,
+        teamId,
+        isActive: true,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    }
+  }
+  await writer?.close();
+  return { issued, kept, deactivated };
+}
+
+export async function seedGame(
+  db: Firestore,
+  raw: SeedData,
+  { rotateArtifactCodes = false }: { rotateArtifactCodes?: boolean } = {},
+): Promise<{ artifacts: SeededArtifact[]; codesKept: number }> {
   const data = seedDataSchema.parse(raw);
   const puzzleIds = new Set(data.puzzles.map((p) => p.id));
   for (const a of data.artifacts) {
@@ -91,7 +158,8 @@ export async function seedGame(db: Firestore, raw: SeedData): Promise<{ artifact
   // game/state: create, or update settings while keeping lastBroadcastAt.
   const gameRef = db.collection(COL.game).doc(GAME_DOC);
   const game = await gameRef.get();
-  await gameRef.set({ ...data.game, updatedAt: now, ...(game.exists ? {} : { lastBroadcastAt: null }) }, { merge: true });
+  const eventId = data.game.eventId ?? (game.get("eventId") as string | undefined) ?? newEventId();
+  await gameRef.set({ ...data.game, eventId, updatedAt: now, ...(game.exists ? {} : { lastBroadcastAt: null }) }, { merge: true });
 
   const writer = db.bulkWriter();
   for (const t of data.teams) {
@@ -139,7 +207,7 @@ export async function seedGame(db: Firestore, raw: SeedData): Promise<{ artifact
   const artifactWriter = db.bulkWriter();
   for (const a of data.artifacts) {
     const qrCode = a.qrCode ?? existing.get(a.key) ?? newQrCode();
-    artifacts.push({ key: a.key, qrCode, name: a.name, qrType: a.qrType, puzzleId: a.puzzleId ?? null });
+    artifacts.push({ key: a.key, qrCode, name: a.name, qrType: a.qrType, puzzleId: a.puzzleId ?? null, teamCodes: {} });
     void artifactWriter.set(
       db.collection(COL.artifacts).doc(qrCode),
       {
@@ -160,8 +228,20 @@ export async function seedGame(db: Firestore, raw: SeedData): Promise<{ artifact
   }
   await artifactWriter.close();
 
+  // Per-team artifact codes, for real artifacts and decoys alike, so a decoy
+  // is indistinguishable from a real artifact by its code.
+  const seekerTeams = data.teams.filter((t) => t.type === "seeker").map((t) => t.id);
+  const { issued, kept } = await provisionArtifactCodes(
+    db,
+    artifacts.map((a) => a.qrCode),
+    seekerTeams,
+    { rotate: rotateArtifactCodes },
+  );
+  const byId = new Map(artifacts.map((a) => [a.qrCode, a]));
+  for (const c of issued) byId.get(c.artifactId)!.teamCodes[c.teamId] = c.code;
+
   for (const p of data.puzzles) {
     await mirrorPuzzle(db, p.id, (await db.collection(COL.puzzles).doc(p.id).get()).data());
   }
-  return { artifacts };
+  return { artifacts, codesKept: kept };
 }
