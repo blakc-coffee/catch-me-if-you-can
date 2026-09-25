@@ -114,6 +114,7 @@ Each artifact has **one QR code, and every team may claim it once** — this is 
 - **Decoys** (`qrType: "wrong"`) return `DECOY` and the organiser's `redirectUrl` for every team and award nothing.
 - **Codes.** Rules hide artifact documents from players and `claimArtifact` allows 30 attempts a minute, but guessable codes like `QR-KEY-001` are still weak — print long random codes (the seed script generates `OV-` plus 16 random characters) and export them to `functions/seed-output/<project>-qr-codes.csv` (git-ignored).
 - **Revoking an artifact:** set `isActive: false` on its `artifacts` doc; its code then fails for every team.
+- **Re-seeding** keeps existing codes, retires seed-managed artifacts that were removed from the seed file (their codes stop working), and removes optional fields (`points`, `hints`, `audience`, `tokensAwarded`) that were deleted from it.
 - **Rotating a code** (e.g. a code posted online): `npm run rotate-artifact -- --artifact <currentQrCode>` copies the artifact to a new random code and deactivates the old one, so the old code fails for everyone. The artifact's `claimKey` is carried over, so teams that already claimed it cannot claim it again with the new code. The new code goes to `functions/seed-output/<project>-rotated-<time>.csv`; re-seeding keeps it.
 
 ### Location trust

@@ -71,3 +71,15 @@ describe("QR payloads", () => {
     expect(artifactKey("QR-KEY-001")).not.toBe(artifactKey("QR-KEY-002"));
   });
 });
+
+describe("CSV export fields", () => {
+  it("quotes, escapes and defuses spreadsheet formulas", async () => {
+    const { csvField } = await import("../../scripts/seedGame.js");
+    expect(csvField("Golden Key")).toBe("Golden Key");
+    expect(csvField('The "Key", part 2')).toBe('"The ""Key"", part 2"');
+    expect(csvField("line\nbreak")).toBe('"line\nbreak"');
+    expect(csvField("=HYPERLINK(\"x\")")).toBe(`"'=HYPERLINK(""x"")"`);
+    expect(csvField("+1")).toBe("'+1");
+    expect(csvField("OV-abc")).toBe("OV-abc");
+  });
+});

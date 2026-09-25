@@ -4,6 +4,7 @@ import { GAME_DEFAULTS, RATE_LIMITS } from "../config.js";
 import { loadActor, read, refs, requireRole, type CallContext } from "../lib/context.js";
 import { fail } from "../lib/errors.js";
 import { db } from "../lib/firebase.js";
+import { raceHooks } from "../lib/raceHooks.js";
 import { consumeRateLimit } from "../lib/rateLimit.js";
 import { randomToken } from "../lib/crypto.js";
 import { parseInput, uidSchema } from "../lib/validation.js";
@@ -30,7 +31,10 @@ export async function setGameStatus(ctx: CallContext, raw: unknown): Promise<Set
   requireRole(actor.role, ["admin"]);
   await consumeRateLimit(d, `admin_${ctx.uid}`, RATE_LIMITS.adminAction);
 
+  await raceHooks.adminBeforeCommit?.();
   await d.runTransaction(async (tx) => {
+    // Re-checked in the transaction: a caller demoted mid-request cannot act.
+    requireRole((await loadActor(d, tx, ctx.uid)).role, ["admin"]);
     const snap = await tx.get(refs.game(d));
     const now = FieldValue.serverTimestamp();
     if (snap.exists) tx.update(snap.ref, { status, updatedAt: now });
@@ -59,7 +63,9 @@ export async function eliminatePlayer(ctx: CallContext, raw: unknown): Promise<E
   requireRole(actor.role, ["surveillance", "admin"]);
   await consumeRateLimit(d, `admin_${ctx.uid}`, RATE_LIMITS.adminAction);
 
+  await raceHooks.adminBeforeCommit?.();
   await d.runTransaction(async (tx) => {
+    requireRole((await loadActor(d, tx, ctx.uid)).role, ["surveillance", "admin"]);
     const user = await read<UserDoc>(tx, refs.user(d, uid));
     if (!user) fail("not-found", "USER_NOT_FOUND", "User has no profile.");
     const seeker = await read<SeekerDoc>(tx, refs.seeker(d, uid));

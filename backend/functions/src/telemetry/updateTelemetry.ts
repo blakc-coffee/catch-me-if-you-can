@@ -59,6 +59,10 @@ export async function updateTelemetry(ctx: CallContext, raw: unknown): Promise<U
   // Fail fast on eligibility before throttling, so a client that was eliminated
   // or moved off the seeker side gets a terminal reason instead of RATE_LIMITED.
   requirePlayer(await loadActor(d, d, ctx.uid), ["seeker"]);
+  // Reject implausible or out-of-order fixes before charging the rate limit,
+  // so the next, valid fix is not throttled. Re-checked in the transaction.
+  const early = checkMovement(acceptedFix(await read<SeekerDoc>(d, refs.seeker(d, ctx.uid))), input, nowMs);
+  if (early) rejectFix(early);
 
   const { nextAllowedAtMs } = await consumeRateLimit(
     d,

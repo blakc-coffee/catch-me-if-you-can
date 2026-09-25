@@ -1,5 +1,5 @@
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { claimArtifact } from "../../src/artifacts/claimArtifact.js";
 import { assignUser } from "../../src/auth/assignUser.js";
 import { createOrSyncProfile } from "../../src/auth/profile.js";
@@ -7,13 +7,14 @@ import { createBroadcast } from "../../src/broadcasts/createBroadcast.js";
 import { eliminatePlayer, setGameStatus } from "../../src/game/admin.js";
 import { getMissionState } from "../../src/game/missionState.js";
 import { auth, db } from "../../src/lib/firebase.js";
+import { raceHooks } from "../../src/lib/raceHooks.js";
 import { mirrorPuzzle } from "../../src/puzzles/mirror.js";
 import { submitPuzzleAnswer } from "../../src/puzzles/submitPuzzleAnswer.js";
 import { joinTeam } from "../../src/teams/joinTeam.js";
 import { deleteLocationHistory, uploadLocationBatch } from "../../src/telemetry/locationBatches.js";
 import { stopTracking, updateTelemetry } from "../../src/telemetry/updateTelemetry.js";
-import { rotateArtifactCode, type SeededArtifact } from "../../scripts/seedGame.js";
-import { CODES, docData, expectReason, makeUser, onCampus, resetEmulators, seed } from "./helpers.js";
+import { rotateArtifactCode, seedGame, type SeededArtifact } from "../../scripts/seedGame.js";
+import { CODES, docData, expectReason, makeUser, onCampus, resetEmulators, seed, seedData } from "./helpers.js";
 
 let qr: Map<string, SeededArtifact>;
 /** The artifact's single QR code, shared by every team. */
@@ -486,6 +487,129 @@ describe("createBroadcast", () => {
     ]);
     const err = await expectReason(createBroadcast(surv, {}), "BROADCAST_COOLDOWN");
     expect((err.details as { retryAfterMs: number }).retryAfterMs).toBeGreaterThan(590_000);
+  });
+});
+
+describe("transactions re-check what decides the outcome", () => {
+  afterEach(() => {
+    delete raceHooks.answerBeforeAward;
+    delete raceHooks.adminBeforeCommit;
+  });
+
+  it("a correct answer does not score if the game ends before the award commits", async () => {
+    const s = await seeker("alpha");
+    await claimArtifact(s, { payload: code("a11") });
+    const admin = await makeUser("admin");
+    raceHooks.answerBeforeAward = async () => {
+      delete raceHooks.answerBeforeAward;
+      await setGameStatus(admin, { status: "ended" });
+    };
+    await expectReason(submitPuzzleAnswer(s, { puzzleId: "case-01", answer: "dhh" }), "GAME_ENDED");
+    expect(await docData("puzzleClaims/case-01")).toBeUndefined();
+    const team = await docData<{ score: number; puzzlesSolved?: number }>("teams/alpha");
+    expect(team?.score).toBe(25);
+    expect(team?.puzzlesSolved ?? 0).toBe(0);
+  });
+
+  it("a player moved to a team without the unlock cannot score for it", async () => {
+    const s = await seeker("alpha");
+    await claimArtifact(s, { payload: code("a11") });
+    const admin = await makeUser("admin");
+    raceHooks.answerBeforeAward = async () => {
+      delete raceHooks.answerBeforeAward;
+      await assignUser(admin, { uid: s.uid, teamId: "bravo" });
+    };
+    await expectReason(submitPuzzleAnswer(s, { puzzleId: "case-01", answer: "dhh" }), "PUZZLE_LOCKED");
+    expect(await docData("puzzleClaims/case-01")).toBeUndefined();
+    expect((await docData("teams/bravo"))?.score ?? 0).toBe(0);
+  });
+
+  it("an answer changed by an admin mid-request is judged against the new answer", async () => {
+    const s = await seeker("alpha");
+    await claimArtifact(s, { payload: code("a11") });
+    raceHooks.answerBeforeAward = async () => {
+      delete raceHooks.answerBeforeAward;
+      await db().doc("puzzles/case-01").update({ answer: "david" });
+    };
+    await expect(submitPuzzleAnswer(s, { puzzleId: "case-01", answer: "dhh" })).resolves.toEqual({ status: "INCORRECT", puzzleId: "case-01" });
+    expect(await docData("puzzleClaims/case-01")).toBeUndefined();
+  });
+
+  it("the normal answer path still awards exactly once", async () => {
+    const s = await seeker("alpha");
+    await claimArtifact(s, { payload: code("a11") });
+    let hookRuns = 0;
+    raceHooks.answerBeforeAward = async () => {
+      hookRuns += 1;
+    };
+    await expect(submitPuzzleAnswer(s, { puzzleId: "case-01", answer: "dhh" })).resolves.toMatchObject({ status: "SOLVED" });
+    expect(hookRuns).toBe(1);
+  });
+
+  it("an admin demoted mid-request cannot change the game state", async () => {
+    const admin = await makeUser("admin");
+    const other = await makeUser("admin");
+    raceHooks.adminBeforeCommit = async () => {
+      delete raceHooks.adminBeforeCommit;
+      await assignUser(other, { uid: admin.uid, role: "seeker" });
+    };
+    await expectReason(setGameStatus(admin, { status: "ended" }), "ROLE_NOT_ALLOWED");
+    expect(await docData("game/state")).toMatchObject({ status: "active" });
+  });
+
+  it("a surveillance user demoted mid-request cannot eliminate a player", async () => {
+    const surv = await makeUser("surveillance");
+    const target = await seeker();
+    const admin = await makeUser("admin");
+    raceHooks.adminBeforeCommit = async () => {
+      delete raceHooks.adminBeforeCommit;
+      await assignUser(admin, { uid: surv.uid, role: "seeker" });
+    };
+    await expectReason(eliminatePlayer(surv, { uid: target.uid }), "ROLE_NOT_ALLOWED");
+    expect(await docData(`users/${target.uid}`)).toMatchObject({ status: "active" });
+  });
+
+  it("a deactivated join code is refused", async () => {
+    const codes = await db().collection("teamJoinCodes").where("teamId", "==", "alpha").get();
+    await codes.docs[0]!.ref.update({ active: false });
+    await expectReason(joinTeam(await makeUser("seeker"), { joinCode: CODES.alpha }), "INVALID_JOIN_CODE");
+    await expect(joinTeam(await makeUser("seeker"), { joinCode: CODES.bravo })).resolves.toMatchObject({ team: { teamId: "bravo" } });
+  });
+
+  it("a rejected live fix does not use up the rate limit", async () => {
+    const s = await seeker();
+    const ms = Date.now() - 10_000;
+    await db().doc(`seekers/${s.uid}`).set({
+      uid: s.uid, teamId: "alpha", playerId: "OP-T", name: "T", active: true, trackingEnabled: true, status: "active",
+      lat: 9.754, lon: 76.649392, accuracyM: 6, clientTs: ms, fixServerMs: ms, lastPing: Timestamp.fromMillis(ms), updatedAt: Timestamp.fromMillis(ms),
+    });
+    await expectReason(updateTelemetry(s, fix({ lat: 9.755678, lon: 76.650101 })), "TELEMETRY_IMPLAUSIBLE_MOVEMENT");
+    await expectReason(updateTelemetry(s, fix({ lat: 9.755678, lon: 76.650101 })), "TELEMETRY_IMPLAUSIBLE_MOVEMENT");
+    await expect(updateTelemetry(s, fix({ lat: 9.754, lon: 76.6494 }))).resolves.toMatchObject({ inBounds: true });
+  });
+});
+
+describe("re-seeding reconciles the seed file", () => {
+  it("retires artifacts removed from the file and removes deleted optional fields", async () => {
+    const removed = code("a15");
+    const data = structuredClone(seedData);
+    data.artifacts = data.artifacts.filter((a) => a.key !== "a15").map((a) => (a.key === "a01" ? { ...a, points: 40 } : a));
+    data.puzzles = data.puzzles.map((p) => (p.id === "case-01" ? { ...p, hints: undefined, points: undefined } : p));
+    let result = await seedGame(db(), data);
+    expect(result.retired).toBe(1);
+    expect(await docData(`artifacts/${removed}`)).toMatchObject({ isActive: false });
+    await expectReason(claimArtifact(await seeker(), { payload: removed }), "INVALID_ARTIFACT_CODE");
+    expect(await docData(`artifacts/${code("a01")}`)).toMatchObject({ points: 40 });
+    const puzzle = await docData<Record<string, unknown>>("puzzles/case-01");
+    expect(puzzle).not.toHaveProperty("hints");
+    expect(puzzle).not.toHaveProperty("points");
+    expect(await docData("puzzlePublic/case-01")).toMatchObject({ hints: [], points: 100 });
+
+    // Dropping the override removes it again; a second identical re-seed retires nothing.
+    result = await seedGame(db(), { ...data, artifacts: data.artifacts.map((a) => (a.key === "a01" ? { ...a, points: undefined } : a)) });
+    expect(result.retired).toBe(0);
+    expect(await docData(`artifacts/${code("a01")}`)).not.toHaveProperty("points");
+    await expect(claimArtifact(await seeker(), { payload: code("a01") })).resolves.toMatchObject({ points: 25 });
   });
 });
 

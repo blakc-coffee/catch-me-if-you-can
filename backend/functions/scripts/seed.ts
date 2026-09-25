@@ -16,7 +16,7 @@ import { getAuth } from "firebase-admin/auth";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { makePlayerId } from "../src/lib/context.js";
 import { initAdmin } from "./adminApp.js";
-import { seedGame } from "./seedGame.js";
+import { csvField, seedGame } from "./seedGame.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const { values: args } = parseArgs({
@@ -37,19 +37,20 @@ db.settings({ ignoreUndefinedProperties: true });
 
 const dataPath = args.data ? path.resolve(args.data) : path.join(here, "seed-data.example.json");
 const data = JSON.parse(readFileSync(dataPath, "utf8"));
-const { artifacts } = await seedGame(db, data);
+const { artifacts, retired } = await seedGame(db, data);
 
 const outDir = path.join(here, "..", "seed-output");
 mkdirSync(outDir, { recursive: true });
 const csv = [
   "key,name,qrType,puzzleId,qrCode",
-  ...artifacts.map((a) => `${a.key},"${a.name}",${a.qrType},${a.puzzleId ?? ""},${a.qrCode}`),
+  ...artifacts.map((a) => [a.key, a.name, a.qrType, a.puzzleId ?? "", a.qrCode].map(csvField).join(",")),
 ];
 const outFile = path.join(outDir, `${projectId}-qr-codes.csv`);
 writeFileSync(outFile, csv.join("\n") + "\n");
 
 console.log(`Seeded game on ${args.production ? projectId : `emulator (${projectId})`}.`);
 console.log(`QR codes (${artifacts.length}) → ${path.relative(process.cwd(), outFile)}`);
+if (retired > 0) console.log(`Retired ${retired} artifact(s) no longer in the seed file; their codes stop working.`);
 const teams = data.teams as { name: string; joinCode?: string }[];
 if (!args.production) {
   console.log(`Team codes: ${teams.filter((t) => t.joinCode).map((t) => `${t.name}=${t.joinCode}`).join(", ")}`);

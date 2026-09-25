@@ -76,6 +76,15 @@ export interface SeededArtifact {
   puzzleId: string | null;
 }
 
+/**
+ * One CSV field: quoted and quote-doubled when needed, and prefixed with "'"
+ * when a spreadsheet would otherwise read it as a formula.
+ */
+export function csvField(value: string): string {
+  const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+}
+
 /** QR values for printing: "OV-" + 16 random base64url chars. */
 export function newQrCode(): string {
   return `OV-${randomToken(12)}`;
@@ -103,7 +112,7 @@ export async function rotateArtifactCode(db: Firestore, artifactId: string): Pro
   return { oldCode: artifactId, newCode };
 }
 
-export async function seedGame(db: Firestore, raw: SeedData): Promise<{ artifacts: SeededArtifact[] }> {
+export async function seedGame(db: Firestore, raw: SeedData): Promise<{ artifacts: SeededArtifact[]; retired: number }> {
   const data = seedDataSchema.parse(raw);
   const puzzleIds = new Set(data.puzzles.map((p) => p.id));
   for (const a of data.artifacts) {
@@ -135,10 +144,11 @@ export async function seedGame(db: Firestore, raw: SeedData): Promise<{ artifact
         question: p.question,
         answer: p.answer,
         createdAt: now,
-        ...(p.points === undefined ? {} : { points: p.points }),
-        ...(p.tokensAwarded === undefined ? {} : { tokensAwarded: p.tokensAwarded }),
-        ...(p.hints === undefined ? {} : { hints: p.hints }),
-        ...(p.audience === undefined ? {} : { audience: p.audience }),
+        // Optional fields removed from the seed file are removed from the doc too.
+        points: p.points ?? FieldValue.delete(),
+        tokensAwarded: p.tokensAwarded ?? FieldValue.delete(),
+        hints: p.hints ?? FieldValue.delete(),
+        audience: p.audience ?? FieldValue.delete(),
       },
       { merge: true },
     );
@@ -159,7 +169,8 @@ export async function seedGame(db: Firestore, raw: SeedData): Promise<{ artifact
 
   // Artifacts keyed by QR code; reuse the code previously generated for the same seedKey.
   const existing = new Map<string, string>();
-  for (const doc of (await db.collection(COL.artifacts).where("seedKey", "!=", null).get()).docs) {
+  const seeded = (await db.collection(COL.artifacts).where("seedKey", "!=", null).get()).docs;
+  for (const doc of seeded) {
     // Rotated-out codes stay as inactive docs; only the current code is reused.
     if (doc.get("isActive") === true) existing.set(String(doc.get("seedKey")), doc.id);
   }
@@ -181,15 +192,24 @@ export async function seedGame(db: Firestore, raw: SeedData): Promise<{ artifact
         isActive: true,
         seedKey: a.key,
         createdAt: now,
-        ...(a.points === undefined ? {} : { points: a.points }),
+        points: a.points ?? FieldValue.delete(),
       },
       { merge: true },
     );
+  }
+  // Seed-managed artifacts no longer in the file (or whose key now maps to a
+  // different code) are retired, so their printed codes stop working.
+  const current = new Map(artifacts.map((a) => [a.key, a.qrCode]));
+  let retired = 0;
+  for (const doc of seeded) {
+    if (doc.get("isActive") !== true || current.get(String(doc.get("seedKey"))) === doc.id) continue;
+    retired += 1;
+    void artifactWriter.update(doc.ref, { isActive: false, retiredAt: now });
   }
   await artifactWriter.close();
 
   for (const p of data.puzzles) {
     await mirrorPuzzle(db, p.id, (await db.collection(COL.puzzles).doc(p.id).get()).data());
   }
-  return { artifacts };
+  return { artifacts, retired };
 }
