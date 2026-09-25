@@ -13,10 +13,17 @@ import { isTracking } from "./src/services/locationService";
 import { loadGameState, saveGameState } from "./src/services/storage";
 import { colors } from "./src/theme";
 import type { AppRoute, GameState } from "./src/types";
-import { createOrSyncProfile } from "./src/services/firebase/callables";
+import { claimArtifact, createOrSyncProfile, submitPuzzleAnswer } from "./src/services/firebase/callables";
+import type { ClaimArtifactResponse, SubmitPuzzleAnswerResponse } from "./src/services/firebase/contract";
 import { configureFirebase } from "./src/services/firebase/config";
 
-const initialState: GameState = { claimedArtifactIds: [], lastScannedPayload: null };
+const initialState: GameState = {
+  claimedArtifactIds: [],
+  solvedPuzzleIds: [],
+  lastScannedPayload: null,
+  activePuzzle: null,
+  teamArtifactsClaimed: null,
+};
 
 configureFirebase();
 
@@ -75,19 +82,39 @@ export default function App() {
     void saveGameState(next);
   }, []);
 
-  const onScanned = useCallback((payload: string) => {
-    updateGame({ ...game, lastScannedPayload: payload });
+  const onScanned = useCallback(async (payload: string): Promise<ClaimArtifactResponse> => {
+    const result = await claimArtifact(payload);
+    if (result.status === "DECOY") return result;
+    updateGame({
+      ...game,
+      claimedArtifactIds: game.claimedArtifactIds.includes(result.artifactId)
+        ? game.claimedArtifactIds
+        : [...game.claimedArtifactIds, result.artifactId],
+      lastScannedPayload: payload,
+      activePuzzle: result.puzzle ?? game.activePuzzle,
+      teamArtifactsClaimed: result.teamArtifactsClaimed,
+    });
+    return result;
   }, [game, updateGame]);
 
-  const onSolved = useCallback(() => {
-    if (game.claimedArtifactIds.includes(mission.caseFile.id)) return;
-    updateGame({ ...game, claimedArtifactIds: [...game.claimedArtifactIds, mission.caseFile.id] });
+  const onSolved = useCallback(async (answer: string): Promise<SubmitPuzzleAnswerResponse> => {
+    if (!game.activePuzzle) throw new Error("No puzzle is unlocked.");
+    const result = await submitPuzzleAnswer(game.activePuzzle.puzzleId, answer);
+    if (result.status === "SOLVED" || (result.status === "ALREADY_CLAIMED" && result.solvedByYourTeam)) {
+      updateGame({
+        ...game,
+        solvedPuzzleIds: game.solvedPuzzleIds.includes(game.activePuzzle.puzzleId)
+          ? game.solvedPuzzleIds
+          : [...game.solvedPuzzleIds, game.activePuzzle.puzzleId],
+      });
+    }
+    return result;
   }, [game, updateGame]);
 
   const screen = useMemo(() => {
-    const claims = mission.startingClaims + game.claimedArtifactIds.length;
+    const claims = game.teamArtifactsClaimed ?? mission.startingClaims + game.claimedArtifactIds.length;
     if (route === "scanner") return <ScannerScreen onNavigate={setRoute} onScanned={onScanned} />;
-    if (route === "case") return <CaseScreen unlocked={Boolean(game.lastScannedPayload)} solved={game.claimedArtifactIds.includes(mission.caseFile.id)} onSolved={onSolved} onNavigate={setRoute} />;
+    if (route === "case") return <CaseScreen puzzle={game.activePuzzle} solved={Boolean(game.activePuzzle && game.solvedPuzzleIds.includes(game.activePuzzle.puzzleId))} onSolved={onSolved} onNavigate={setRoute} />;
     if (route === "tracking") return <TrackingScreen active={tracking} onTrackingChange={setTracking} onNavigate={setRoute} />;
     return <MissionScreen claims={claims} tracking={tracking} onNavigate={setRoute} />;
   }, [game, onScanned, onSolved, route, tracking]);

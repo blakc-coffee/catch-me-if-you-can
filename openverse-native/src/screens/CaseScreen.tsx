@@ -2,27 +2,33 @@ import { useState } from "react";
 import { KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, View } from "react-native";
 import { AppShell } from "../components/AppShell";
 import { Card, Eyebrow, PrimaryButton } from "../components/Primitives";
-import { mission } from "../data/mission";
 import { colors } from "../theme";
 import type { AppRoute } from "../types";
+import type { PuzzleDTO, SubmitPuzzleAnswerResponse } from "../services/firebase/contract";
 
-export function CaseScreen({ solved, unlocked, onSolved, onNavigate }: { solved: boolean; unlocked: boolean; onSolved: () => void; onNavigate: (route: AppRoute) => void }) {
+export function CaseScreen({ solved, puzzle, onSolved, onNavigate }: { solved: boolean; puzzle: PuzzleDTO | null; onSolved: (answer: string) => Promise<SubmitPuzzleAnswerResponse>; onNavigate: (route: AppRoute) => void }) {
   const [answer, setAnswer] = useState("");
   const [wrong, setWrong] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const submit = () => {
-    if (answer.trim().toUpperCase() === mission.caseFile.acceptedAnswer) {
-      setWrong(false);
-      onSolved();
-    } else {
-      setWrong(true);
+  const submit = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await onSolved(answer);
+      setWrong(result.status === "INCORRECT" || (result.status === "ALREADY_CLAIMED" && !result.solvedByYourTeam));
+    } catch {
+      setError("Could not submit the answer. Check your connection and try again.");
+    } finally {
+      setBusy(false);
     }
   };
 
   return (
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <AppShell active="case" title="SEEKER / CASE 01" onNavigate={onNavigate}>
-        {!unlocked ? (
+        {!puzzle ? (
           <Card style={styles.locked}>
             <Text style={styles.lock}>⌁</Text>
             <Text style={styles.title}>Case locked</Text>
@@ -33,26 +39,23 @@ export function CaseScreen({ solved, unlocked, onSolved, onNavigate }: { solved:
           <View style={styles.successPanel}>
             <Text style={styles.successIcon}>✓</Text>
             <Eyebrow color={colors.success}>CASE VERIFIED</Eyebrow>
-            <Text style={styles.successTitle}>DHH accepted.</Text>
-            <Text style={styles.body}>Artifact 05 has been added to your recovered set.</Text>
+            <Text style={styles.successTitle}>Answer accepted.</Text>
+            <Text style={styles.body}>The puzzle has been credited to your team.</Text>
             <PrimaryButton onPress={() => onNavigate("mission")}>Return to mission  →</PrimaryButton>
           </View>
         ) : (
           <>
             <Eyebrow>CASE 01 / 03</Eyebrow>
-            <Text style={styles.title}>{mission.caseFile.title}</Text>
+            <Text style={styles.title}>{puzzle.title}</Text>
             <Card>
               <Eyebrow>CASE FILE 01 / IDENTITY</Eyebrow>
-              <Text style={styles.body}>Sherlock found a programmer, but his name was removed. Find him using these clues:</Text>
-              {mission.caseFile.clues.map((clue, index) => <Text key={clue} style={styles.clue}>{index + 1}.  {clue}</Text>)}
-              <Text style={styles.question}>Who is he? Enter three initials, not the full name.</Text>
+              <Text style={styles.question}>{puzzle.question}</Text>
             </Card>
 
-            <Text style={styles.inputLabel}>YOUR ANSWER  /  THREE INITIALS</Text>
+            <Text style={styles.inputLabel}>YOUR ANSWER</Text>
             <TextInput
               accessibilityLabel="Case answer"
               value={answer}
-              maxLength={3}
               autoCapitalize="characters"
               autoCorrect={false}
               placeholder="Enter answer"
@@ -61,7 +64,8 @@ export function CaseScreen({ solved, unlocked, onSolved, onNavigate }: { solved:
               style={styles.input}
             />
             {wrong ? <Text style={styles.error}>Answer rejected. Recheck the clues.</Text> : null}
-            <PrimaryButton disabled={answer.trim().length !== 3} onPress={submit}>Submit answer  →</PrimaryButton>
+            {error ? <Text style={styles.error}>{error}</Text> : null}
+            <PrimaryButton loading={busy} disabled={!answer.trim()} onPress={() => void submit()}>Submit answer  →</PrimaryButton>
           </>
         )}
       </AppShell>

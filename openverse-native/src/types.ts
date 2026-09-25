@@ -12,5 +12,8 @@ export type StoredPosition = {
 
 export type GameState = {
   claimedArtifactIds: string[];
+  solvedPuzzleIds: string[];
   lastScannedPayload: string | null;
+  activePuzzle: { puzzleId: string; title: string; question: string } | null;
+  teamArtifactsClaimed: number | null;
 };

@@ -7,7 +7,10 @@ const MAX_LOCATION_SAMPLES = 500;
 
 const initialGameState: GameState = {
   claimedArtifactIds: [],
-  lastScannedPayload: null
+  solvedPuzzleIds: [],
+  lastScannedPayload: null,
+  activePuzzle: null,
+  teamArtifactsClaimed: null
 };
 
 export async function loadGameState(): Promise<GameState> {
@@ -54,4 +57,14 @@ export async function loadLocations(): Promise<StoredPosition[]> {
 
 export async function clearLocations(): Promise<void> {
   await AsyncStorage.removeItem(LOCATION_KEY);
+}
+
+const sampleKey = (sample: StoredPosition) =>
+  `${sample.timestamp}:${sample.latitude}:${sample.longitude}`;
+
+export async function removeUploadedLocations(uploaded: StoredPosition[]): Promise<void> {
+  const pending = await loadLocations();
+  const uploadedKeys = new Set(uploaded.map(sampleKey));
+  const remaining = pending.filter((sample) => !uploadedKeys.has(sampleKey(sample)));
+  await AsyncStorage.setItem(LOCATION_KEY, JSON.stringify(remaining));
 }

@@ -5,16 +5,29 @@ import { AppShell } from "../components/AppShell";
 import { Card, Eyebrow, PrimaryButton } from "../components/Primitives";
 import { colors } from "../theme";
 import type { AppRoute } from "../types";
+import type { ClaimArtifactResponse } from "../services/firebase/contract";
+import { getCallableReason } from "../services/firebase/callables";
 
-export function ScannerScreen({ onNavigate, onScanned }: { onNavigate: (route: AppRoute) => void; onScanned: (payload: string) => void }) {
+export function ScannerScreen({ onNavigate, onScanned }: { onNavigate: (route: AppRoute) => void; onScanned: (payload: string) => Promise<ClaimArtifactResponse> }) {
   const [permission, requestPermission] = useCameraPermissions();
   const [payload, setPayload] = useState<string | null>(null);
   const [torch, setTorch] = useState(false);
+  const [result, setResult] = useState<ClaimArtifactResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState(false);
 
   const handleBarcode = useCallback((result: BarcodeScanningResult) => {
     if (payload) return;
     setPayload(result.data);
-    onScanned(result.data);
+    setVerifying(true);
+    setError(null);
+    void onScanned(result.data)
+      .then(setResult)
+      .catch((scanError) => {
+        const reason = getCallableReason(scanError);
+        setError(reason === "INVALID_ARTIFACT_CODE" ? "This QR code is not a valid Openverse artifact." : "Artifact verification failed. Check your connection and try again.");
+      })
+      .finally(() => setVerifying(false));
   }, [onScanned, payload]);
 
   return (
@@ -53,16 +66,22 @@ export function ScannerScreen({ onNavigate, onScanned }: { onNavigate: (route: A
             <Pressable accessibilityRole="button" onPress={() => setTorch((value) => !value)} style={styles.torchButton}>
               <Text style={styles.torchText}>{torch ? "Torch on" : "Torch off"}</Text>
             </Pressable>
-            <Text style={styles.cameraStatus}>{payload ? "ARTIFACT VERIFIED" : "SEARCHING FOR CODE"}</Text>
+            <Text style={styles.cameraStatus}>{verifying ? "VERIFYING ARTIFACT" : result ? "ARTIFACT VERIFIED" : payload ? "VERIFICATION FAILED" : "SEARCHING FOR CODE"}</Text>
           </View>
         )}
 
-        {payload ? (
+        {result ? (
           <Card style={styles.result}>
-            <Text style={styles.success}>✓  VALID ARTIFACT</Text>
-            <Text numberOfLines={1} style={styles.resultText}>{payload}</Text>
-            <PrimaryButton onPress={() => onNavigate("case")}>Open case file  →</PrimaryButton>
-            <Pressable onPress={() => setPayload(null)}><Text style={styles.scanAgain}>Scan another code</Text></Pressable>
+            <Text style={styles.success}>{result.status === "DECOY" ? "○  DECOY ARTIFACT" : "✓  ARTIFACT CLAIMED"}</Text>
+            <Text numberOfLines={1} style={styles.resultText}>{result.name}</Text>
+            {result.status === "CLAIMED" && result.puzzle ? <PrimaryButton onPress={() => onNavigate("case")}>Open case file  →</PrimaryButton> : null}
+            <Pressable onPress={() => { setPayload(null); setResult(null); setError(null); }}><Text style={styles.scanAgain}>Scan another code</Text></Pressable>
+          </Card>
+        ) : null}
+        {error ? (
+          <Card style={styles.result}>
+            <Text style={styles.error}>{error}</Text>
+            <Pressable onPress={() => { setPayload(null); setError(null); }}><Text style={styles.scanAgain}>Try another code</Text></Pressable>
           </Card>
         ) : null}
       </View>
@@ -91,5 +110,6 @@ const styles = StyleSheet.create({
   result: { marginTop: 12 },
   success: { color: colors.success, fontSize: 10, letterSpacing: 1.1, fontWeight: "700" },
   resultText: { color: colors.text, fontSize: 12, marginTop: 7 },
+  error: { color: colors.error, fontSize: 12, lineHeight: 18 },
   scanAgain: { color: colors.body, textAlign: "center", fontSize: 11, marginTop: 14 }
 });

@@ -33,7 +33,7 @@ export function MissionScreen({ claims, tracking, onNavigate }: { claims: number
 
       <View style={styles.sharing}>
         <Text style={styles.sectionLabel}>POSITION SHARING</Text>
-        <Text style={styles.sharingCopy}>{tracking ? "Location is being recorded on this device." : "Enable mission tracking to record your route."}</Text>
+        <Text style={styles.sharingCopy}>{tracking ? "Location is being recorded and synced securely." : "Enable mission tracking to record your route."}</Text>
       </View>
     </AppShell>
   );

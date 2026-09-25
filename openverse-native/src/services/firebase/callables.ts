@@ -9,6 +9,8 @@ import {
   type CreateOrSyncProfileResponse,
   type SubmitPuzzleAnswerRequest,
   type SubmitPuzzleAnswerResponse,
+  type DeleteLocationHistoryResponse,
+  type StopTrackingResponse,
   type UpdateTelemetryRequest,
   type UpdateTelemetryResponse,
   type UploadLocationBatchRequest,
@@ -48,3 +50,17 @@ export const updateTelemetry = (data: UpdateTelemetryRequest) =>
 export const uploadLocationBatch = (data: UploadLocationBatchRequest) =>
   call<UploadLocationBatchRequest, UploadLocationBatchResponse>(CALLABLES.uploadLocationBatch, data);
 
+export const stopRemoteTracking = () =>
+  call<Record<string, never>, StopTrackingResponse>(CALLABLES.stopTracking, {});
+
+export const deleteRemoteLocationHistory = () =>
+  call<Record<string, never>, DeleteLocationHistoryResponse>(CALLABLES.deleteLocationHistory, {});
+
+export function getCallableReason(error: unknown): string | null {
+  if (!error || typeof error !== "object") return null;
+  const details = "details" in error ? (error as { details?: unknown }).details : undefined;
+  if (!details || typeof details !== "object" || !("reason" in details)) return null;
+  return typeof (details as { reason?: unknown }).reason === "string"
+    ? (details as { reason: string }).reason
+    : null;
+}
