@@ -18,7 +18,7 @@
     "deploy:functions": "firebase deploy --only functions",
     "deploy": "firebase deploy --only firestore:rules,firestore:indexes,functions",
     "migrate": "npm --prefix functions run migrate --",
-    "artifact-codes": "npm --prefix functions run artifact-codes --"
+    "rotate-artifact": "npm --prefix functions run rotate-artifact --"
   },
   "devDependencies": {
     "firebase-tools": "15.31.0"

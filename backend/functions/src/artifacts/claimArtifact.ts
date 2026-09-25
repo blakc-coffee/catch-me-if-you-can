@@ -1,14 +1,13 @@
 import { FieldValue } from "firebase-admin/firestore";
-import { logger } from "firebase-functions";
 import { z } from "zod";
 import { CONTENT_DEFAULTS, RATE_LIMITS } from "../config.js";
 import { loadActor, loadGame, loadTeam, refs, requireGameActive, requirePlayer, type CallContext } from "../lib/context.js";
 import { fail } from "../lib/errors.js";
 import { db } from "../lib/firebase.js";
-import { ARTIFACT_CODE_PATTERN, artifactCodeKey, artifactKey } from "../lib/normalize.js";
+import { QR_PAYLOAD_PATTERN, artifactKey } from "../lib/normalize.js";
 import { consumeRateLimit } from "../lib/rateLimit.js";
 import { parseInput } from "../lib/validation.js";
-import { COL, docIds, type ArtifactClaimDoc, type ArtifactCodeDoc, type ArtifactDoc, type PuzzleDoc } from "../models.js";
+import { COL, docIds, type ArtifactClaimDoc, type ArtifactDoc, type PuzzleDoc } from "../models.js";
 import type { ClaimArtifactResponse, PuzzleDTO } from "../shared/contract.js";
 
 const schema = z.strictObject({ payload: z.string().min(1).max(512) });
@@ -29,38 +28,28 @@ export async function countRealArtifacts(): Promise<number> {
 }
 
 /**
- * Redeems a scanned per-team artifact code for the caller's team. The code is
- * looked up by hash in artifactCodes and must be active and issued to the
- * caller's team: a code photographed from, or shared by, another team is
- * rejected with INVALID_ARTIFACT_CODE, exactly like an unknown code, so it
- * reveals nothing. Artifact doc ids (the old static QR values) are not
- * redeemable. Decoys (qrType "wrong") return DECOY with the organiser's
- * redirectUrl and award nothing. A deterministic per-team claim id plus a
- * transactional create() makes duplicate claims fail with
- * ARTIFACT_ALREADY_CLAIMED; the claim, puzzle unlock, team counters and the
+ * Validates a scanned QR payload server-side against artifacts/{qrCode} and
+ * claims it for the caller's team. Each artifact has one shared QR code:
+ * every eligible team may claim it once, and teams do not affect each other.
+ * Decoys (qrType "wrong") return DECOY with the organiser's redirectUrl and
+ * award nothing. A deterministic per-team claim id plus a transactional
+ * create() makes duplicate claims fail with ARTIFACT_ALREADY_CLAIMED; the claim, puzzle unlock, team counters and the
  * player's score commit atomically.
  */
 export async function claimArtifact(ctx: CallContext, raw: unknown): Promise<ClaimArtifactResponse> {
   const { payload } = parseInput(schema, raw);
   const d = db();
   await consumeRateLimit(d, `artifact_${ctx.uid}`, RATE_LIMITS.claimArtifact);
-  const code = payload.trim();
-  if (!ARTIFACT_CODE_PATTERN.test(code)) invalidCode();
+  const qrCode = payload.trim();
+  if (!QR_PAYLOAD_PATTERN.test(qrCode)) invalidCode();
 
-  const codeRef = d.collection(COL.artifactCodes).doc(artifactCodeKey(code));
+  const artifactRef = d.collection(COL.artifacts).doc(qrCode);
   const totalArtifacts = await countRealArtifacts();
 
   return d.runTransaction(async (tx): Promise<ClaimArtifactResponse> => {
     const user = requirePlayer(await loadActor(d, tx, ctx.uid), ["seeker"]);
     requireGameActive(await loadGame(d, tx));
-    const codeDoc = (await tx.get(codeRef)).data() as ArtifactCodeDoc | undefined;
-    if (!codeDoc || codeDoc.isActive !== true) invalidCode();
-    if (codeDoc.teamId !== user.teamId) {
-      logger.warn("artifact code redeemed by another team", { uid: ctx.uid, teamId: user.teamId, codeTeamId: codeDoc.teamId, artifactId: codeDoc.artifactId });
-      invalidCode();
-    }
-
-    const artifactSnap = await tx.get(d.collection(COL.artifacts).doc(codeDoc.artifactId));
+    const artifactSnap = await tx.get(artifactRef);
     const artifact = artifactSnap.data() as ArtifactDoc | undefined;
     if (!artifact || artifact.isActive !== true) invalidCode();
 
@@ -70,7 +59,8 @@ export async function claimArtifact(ctx: CallContext, raw: unknown): Promise<Cla
     if (artifact.qrType !== "correct") invalidCode();
 
     const team = await loadTeam(d, tx, user.teamId);
-    const claimRef = d.collection(COL.artifactClaims).doc(docIds.artifactClaim(user.teamId, artifactKey(artifactSnap.id)));
+    // claimKey survives QR rotation, so a rotated code cannot be claimed twice by one team.
+    const claimRef = d.collection(COL.artifactClaims).doc(docIds.artifactClaim(user.teamId, artifactKey(artifact.claimKey ?? artifactSnap.id)));
     const puzzleId = artifact.puzzleId ?? null;
     const unlockRef = puzzleId ? d.collection(COL.puzzleUnlocks).doc(docIds.puzzleUnlock(user.teamId, puzzleId)) : null;
     const [claimSnap, unlockSnap, puzzleSnap] = await Promise.all([

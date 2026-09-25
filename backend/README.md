@@ -66,7 +66,6 @@ Roles are lower-case: `seeker`, `hider`, `surveillance`, `admin`. An `answer` ma
 | `puzzlePublic/{puzzleId}` | answer-free copy of `puzzles/{id}` + solve state, kept in sync by `onPuzzleWritten` | seekers after their team's unlock; hiders if `hider` ∈ audience; staff |
 | `puzzleClaims/{puzzleId}` | the single winning solve (first-solve lockout across teams) | own team; staff |
 | `broadcasts/{id}` | seeker-position snapshots | hider, surveillance, admin |
-| `artifactCodes/{sha256}` | per-team artifact QR codes, stored as hashes: `artifactId`, `teamId`, `isActive` | **nobody** |
 | `teamJoinCodes/{sha256}` · `rateLimits/{key}` | hashed team codes, throttle state | **nobody** |
 
 ### Roles, teams and claims
@@ -94,7 +93,7 @@ Roles are lower-case: `seeker`, `hider`, `surveillance`, `admin`. An `answer` ma
 | `stopTracking` | any | hides own live position · 30/min |
 | `uploadLocationBatch` | seeker (also after elimination/end) | ≤500 samples, ≤128 KiB; idempotent `batchId` (`DUPLICATE` / `BATCH_ID_CONFLICT`) · 30/min |
 | `deleteLocationHistory` | owner | erases all own batches · 5/hour |
-| `claimArtifact` | active seeker on a team, game active | payload must be a per-team code issued to the caller's team (`artifactCodes`); `wrong` → `DECOY` + `redirectUrl`; `correct` → one claim per team, unlocks `puzzleId` · 30/min |
+| `claimArtifact` | active seeker on a team, game active | looks up `artifacts/{payload}`; `wrong` → `DECOY` + `redirectUrl`; `correct` → one claim per team (every team may claim each artifact once), unlocks `puzzleId` · 30/min |
 | `submitPuzzleAnswer` | seeker (team unlock required) or hider (`hider` ∈ audience) | server compares with `puzzles/{id}.answer`; transaction on `puzzleClaims/{id}` gives exactly one winning team · 10/min per puzzle, 60/min overall |
 | `getMissionState` | seeker/hider on a team (also when eliminated) | read-only: game status + `eventId`, team progress, total active artifacts, and the team's case files (answer-free) · 60/min |
 | `createBroadcast` | surveillance, admin | reads live `seekers/*` in the same transaction as the cooldown (600 s) |
@@ -107,15 +106,15 @@ Every callable also:
 - returns a typed `details.reason` on errors;
 - replaces unexpected errors with a generic `INTERNAL`.
 
-### Artifact QR codes: one code per team
+### Artifact QR codes: one shared code per artifact
 
-Artifacts are deployed as **per-team printed codes**. Every artifact, real or decoy, gets one QR code per seeker team: `OVT-` plus 32 random base64url characters (192 bits). Firestore stores only a SHA-256 hash in `artifactCodes`, which no client can read. `claimArtifact` accepts a code only from the team it was issued to, inside the claim transaction.
+Each artifact has **one QR code, and every team may claim it once** — this is the game rule. In this schema the printed QR value *is* the artifact document ID (`artifacts/{qrCode}`).
 
-- **Replay across teams does not work.** A photographed or shared code is rejected for any other team with `INVALID_ARTIFACT_CODE`, exactly like an unknown code, so it also reveals nothing about decoys. The server logs the attempt.
-- **Artifact document ids (the old static QR values, e.g. `QR-KEY-001`) are no longer redeemable.** Existing printed static codes must be replaced.
-- **Residual risk.** A team can still hand its *own* code to a teammate who is not at the artifact. Per-team codes stop cross-team replay, not remote redemption within a team.
-- **Issuing codes:** `npm run seed` issues codes for seeded artifacts. `npm run artifact-codes` issues them for existing artifacts. Codes already issued are kept on re-runs; `--rotate` (or `seed --rotate-artifact-codes`) revokes every code and issues new ones. New codes are written to `functions/seed-output/<project>-artifact-codes-<time>.csv` (git-ignored, owner-only). Because Firestore keeps only hashes, that file is the only copy.
-- **Revoking one code:** set `isActive: false` on its `artifactCodes` doc (Admin SDK or console).
+- **One claim per team.** `claimArtifact` creates `artifactClaims/{teamId}_{hash}` inside a transaction, so a repeat claim by the same team (or a teammate), including simultaneous scans, fails with `ARTIFACT_ALREADY_CLAIMED`. Other teams are unaffected and claim the same artifact independently. Points, counters and puzzle unlocks are per team.
+- **Decoys** (`qrType: "wrong"`) return `DECOY` and the organiser's `redirectUrl` for every team and award nothing.
+- **Codes.** Rules hide artifact documents from players and `claimArtifact` allows 30 attempts a minute, but guessable codes like `QR-KEY-001` are still weak — print long random codes (the seed script generates `OV-` plus 16 random characters) and export them to `functions/seed-output/<project>-qr-codes.csv` (git-ignored).
+- **Revoking an artifact:** set `isActive: false` on its `artifacts` doc; its code then fails for every team.
+- **Rotating a code** (e.g. a code posted online): `npm run rotate-artifact -- --artifact <currentQrCode>` copies the artifact to a new random code and deactivates the old one, so the old code fails for everyone. The artifact's `claimKey` is carried over, so teams that already claimed it cannot claim it again with the new code. The new code goes to `functions/seed-output/<project>-rotated-<time>.csv`; re-seeding keeps it.
 
 ### Location trust
 
@@ -159,7 +158,7 @@ npm run seed                # in another terminal: teams, areas, puzzles, 15 art
 `npm run seed` prints the following, all for the emulator:
 - **Dev accounts**, password `openverse-dev`: `admin@`, `surveillance@`, `hider1@` (team ghost), `seeker1@` (team alpha) and `seeker2@iiitkottayam.ac.in` (team bravo).
 - **Team codes:** `ALPHA-DEV-2026`, `BRAVO-DEV-2026`, `GHOST-DEV-2026`, `SHADE-DEV-2026`.
-- **Per-team artifact codes** in `functions/seed-output/demo-openverse-artifact-codes-<time>.csv` (git-ignored), with one row per artifact and seeker team. Artifact `a11` unlocks the puzzle "The Programmer" (answer `dhh`). A re-seed keeps existing codes and exports only new ones; reset the emulator, or pass `--rotate-artifact-codes`, to get a fresh set.
+- **QR codes** in `functions/seed-output/demo-openverse-qr-codes.csv` (git-ignored), one per artifact, shared by every team. Artifact `a11` unlocks the puzzle "The Programmer" (answer `dhh`).
 
 **Pointing the Android app at the emulator.** Copy `openverse-native/.env.example` to `openverse-native/.env`. The Android emulator uses `10.0.2.2` to reach the computer. The login screen then shows a development-only **Use local emulator account** button; production builds continue to show Google login only. For a USB phone, run `adb reverse tcp:9099 tcp:9099`, `adb reverse tcp:8080 tcp:8080`, and `adb reverse tcp:5001 tcp:5001`, then set the host to `127.0.0.1`.
 
@@ -173,7 +172,7 @@ npm run test:emulator       # rules, handlers against Firestore/Auth, e2e throug
 
 **Compatibility:** the emulator tests load documents shaped exactly like the current seekerdb data:
 - admin-provisioned users without server fields;
-- `artifacts/QR-KEY-001` and `artifacts/QR-DECOY-001`, whose static codes must be rejected until per-team codes are issued;
+- `artifacts/QR-KEY-001` and `artifacts/QR-DECOY-001`;
 - a puzzle with a plaintext answer.
 
 **They also cover:**
@@ -181,7 +180,7 @@ npm run test:emulator       # rules, handlers against Firestore/Auth, e2e throug
 - per-role reads, and denial of every client write to roles, teams, scores, tokens and solve state;
 - that answers are unreadable except by admins;
 - that hiders can't broadcast;
-- duplicate and concurrent team claims, and cross-team replay of per-team artifact codes (including concurrent redemption of a shared code);
+- one shared QR per artifact: every team claims once, repeats and concurrent same-team scans are rejected, concurrent claims by different teams both succeed, decoys, revoked artifacts and code rotation;
 - telemetry plausibility: first fix, ordinary movement, impossible jumps, stale, future and non-monotonic timestamps, accuracy, campus bounds, backdated-timestamp sequences, and game, role, suspension and elimination transitions;
 - concurrent correct answers from two teams producing exactly one winner;
 - batch idempotency;
@@ -209,13 +208,7 @@ Already in place: the Android app `com.openverse.seeker` is registered, `google-
    ```bash
    npm run seed -- --production --project seekerdb-9e679 --data /secure/path/game.json
    ```
-   Print the per-team codes from `functions/seed-output/seekerdb-9e679-artifact-codes-<time>.csv`, then store that CSV offline or delete it securely.
-
-   For artifacts that already exist (static codes such as `QR-KEY-001` are no longer redeemable), preview and then issue per-team codes:
-   ```bash
-   npm run artifact-codes -- --production --project seekerdb-9e679 --dry-run
-   npm run artifact-codes -- --production --project seekerdb-9e679
-   ```
+   Print the QR codes from `functions/seed-output/seekerdb-9e679-qr-codes.csv`, then store or delete that CSV securely.
 6. **Place players:** send them team codes (`joinTeam`), or have an admin call `assignUser`. To make someone admin from the CLI, run `npm run grant-admin -- --email you@example.com --project seekerdb-9e679 --production`.
 7. **Set up App Check before the first functions deploy.** Sensitive callables enforce it by default.
    - Register the Android app with **Play Integrity**; it needs the app's **SHA-256** from `npx eas-cli credentials -p android`.
@@ -232,7 +225,7 @@ Already in place: the Android app `com.openverse.seeker` is registered, `google-
 
 - **The backend has no runtime secrets.** Join codes exist only as hashes. Puzzle answers live in the admin-only `puzzles` collection, as in the original schema, and are never sent to players.
 - **Functions config** is `.env.<projectId>` (git-ignored), holding `ENFORCE_APP_CHECK`.
-- **Per-team artifact codes** exist in plaintext only in the git-ignored `seed-output/` CSVs. Treat those files like passwords.
+- **QR code exports** in `seed-output/` are git-ignored. Don't share them outside the organisers.
 - **CLI scripts** derive a short-lived Application Default Credentials file from `firebase login`. It's created with owner-only permissions in the OS temp folder and deleted when the script exits. Never commit service-account keys; `.gitignore` blocks common names.
 - **App `EXPO_PUBLIC_*` variables** are inlined into the bundle and hold no secrets.
 

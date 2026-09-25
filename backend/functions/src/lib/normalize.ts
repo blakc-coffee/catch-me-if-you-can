@@ -1,4 +1,4 @@
-import { randomToken, safeEqualHex, sha256Hex } from "./crypto.js";
+import { safeEqualHex, sha256Hex } from "./crypto.js";
 
 const ZERO_WIDTH = /[​-‍⁠﻿]/g;
 
@@ -41,27 +41,13 @@ export function joinCodeKey(code: string): string {
 }
 
 /**
- * Artifact doc ids (existing schema, e.g. "QR-KEY-001"). They identify an
- * artifact but are not redeemable: claims need a per-team artifact code.
+ * QR payloads are artifact doc ids (existing schema, e.g. "QR-KEY-001").
+ * Anything that could not be a Firestore doc id is rejected before lookup.
+ * Printed codes for a real event should be long and random (see the seed script).
  */
 export const QR_PAYLOAD_PATTERN = /^(?!\.\.?$)[A-Za-z0-9._:-]{1,128}$/;
 
 /** Stable key for an artifact inside composite claim ids (qrCode may contain "_"). */
 export function artifactKey(qrCode: string): string {
   return sha256Hex(`artifact:${qrCode}`).slice(0, 32);
-}
-
-/**
- * Per-team artifact QR codes: "OVT-" + 32 base64url chars (192 random bits).
- * Each is issued for one (artifact, seeker team) pair; see artifactCodes.
- */
-export const ARTIFACT_CODE_PATTERN = /^OVT-[A-Za-z0-9_-]{32}$/;
-
-export function newArtifactCode(): string {
-  return `OVT-${randomToken(24)}`;
-}
-
-/** artifactCodes doc id: only the hash of a printed code is stored. */
-export function artifactCodeKey(code: string): string {
-  return sha256Hex(`artifact-code:${code}`);
 }

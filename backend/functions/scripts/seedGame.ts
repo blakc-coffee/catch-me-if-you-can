@@ -1,18 +1,17 @@
 /**
  * Game provisioning in the seekerdb schema, shared by the seed CLI and the
  * emulator tests. Writes teams, areas, puzzles (+ answer-free puzzlePublic
- * mirrors), artifacts, hashed team join codes, hashed per-team artifact codes
- * and the game/state doc. Artifact ids are random and stable across re-seeds
- * (matched by `seedKey`). Per-team artifact codes already issued are kept (so
- * printed codes stay valid) unless `rotateArtifactCodes` is set; only codes
- * created by this run are returned in plaintext. Existing counters and solve
- * state are preserved.
+ * mirrors), artifacts keyed by their QR code, hashed team join codes and the
+ * game/state doc. Each artifact has one QR code shared by every team. Codes
+ * are random and stable across re-seeds (matched by `seedKey`), so printed
+ * codes stay valid; rotateArtifactCode replaces one. Existing counters and
+ * solve state are preserved.
  */
 import { FieldValue, type Firestore } from "firebase-admin/firestore";
 import { z } from "zod";
 import { GAME_DEFAULTS } from "../src/config.js";
 import { randomToken } from "../src/lib/crypto.js";
-import { artifactCodeKey, joinCodeKey, newArtifactCode, splitAcceptedAnswers } from "../src/lib/normalize.js";
+import { joinCodeKey, splitAcceptedAnswers } from "../src/lib/normalize.js";
 import { resourceId } from "../src/lib/validation.js";
 import { COL, GAME_DOC } from "../src/models.js";
 import { newEventId } from "../src/game/admin.js";
@@ -54,7 +53,7 @@ export const seedDataSchema = z.strictObject({
   artifacts: z.array(
     z.strictObject({
       key: z.string().regex(/^[A-Za-z0-9-]{1,40}$/),
-      /** Optional fixed artifact id; otherwise a random id is generated once. Not redeemable. */
+      /** Optional fixed QR value; otherwise a random code is generated once. */
       qrCode: z.string().regex(/^[A-Za-z0-9._:-]{3,128}$/).optional(),
       name: z.string().min(1).max(80),
       description: z.string().max(500),
@@ -71,80 +70,40 @@ export type SeedData = z.input<typeof seedDataSchema>;
 
 export interface SeededArtifact {
   key: string;
-  /** Artifact doc id (identifies the artifact; not redeemable). */
   qrCode: string;
   name: string;
   qrType: "correct" | "wrong";
   puzzleId: string | null;
-  /** Per-team QR codes created by this run, by seeker team id. */
-  teamCodes: Record<string, string>;
 }
 
-/** A newly issued per-team artifact code, for printing. */
-export interface IssuedArtifactCode {
-  artifactId: string;
-  teamId: string;
-  code: string;
-}
-
-/** Artifact doc ids: "OV-" + 16 random base64url chars. */
+/** QR values for printing: "OV-" + 16 random base64url chars. */
 export function newQrCode(): string {
   return `OV-${randomToken(12)}`;
 }
 
 /**
- * Ensures every (artifact, seeker team) pair has one active artifact code.
- * Pairs that already have one keep it; `rotate` deactivates existing codes
- * and issues new ones. Only hashes are stored; the returned plaintext codes
- * are the only copy and must go to the git-ignored seed-output.
+ * Replaces an artifact's single shared QR code (e.g. after the printed code
+ * leaked outside the game). The artifact is copied to a new doc keyed by a new
+ * random code and the old doc is deactivated, so the old code stops working
+ * for everyone. `claimKey` is carried over, so teams that already claimed the
+ * artifact cannot claim it again with the new code; other teams can.
  */
-export async function provisionArtifactCodes(
-  db: Firestore,
-  artifactIds: readonly string[],
-  teamIds: readonly string[],
-  { rotate = false, dryRun = false }: { rotate?: boolean; dryRun?: boolean } = {},
-): Promise<{ issued: IssuedArtifactCode[]; kept: number; deactivated: number }> {
-  const pair = (artifactId: string, teamId: string) => `${artifactId}|${teamId}`;
-  const existing = await db.collection(COL.artifactCodes).where("isActive", "==", true).get();
-  const active = new Set<string>();
-  const writer = dryRun ? null : db.bulkWriter();
-  let deactivated = 0;
-  for (const doc of existing.docs) {
-    const key = pair(String(doc.get("artifactId")), String(doc.get("teamId")));
-    if (rotate) {
-      deactivated += 1;
-      void writer?.update(doc.ref, { isActive: false, deactivatedAt: FieldValue.serverTimestamp() });
-    } else {
-      active.add(key);
-    }
-  }
-  const issued: IssuedArtifactCode[] = [];
-  let kept = 0;
-  for (const artifactId of artifactIds) {
-    for (const teamId of teamIds) {
-      if (active.has(pair(artifactId, teamId))) {
-        kept += 1;
-        continue;
-      }
-      const code = newArtifactCode();
-      issued.push({ artifactId, teamId, code });
-      void writer?.create(db.collection(COL.artifactCodes).doc(artifactCodeKey(code)), {
-        artifactId,
-        teamId,
-        isActive: true,
-        createdAt: FieldValue.serverTimestamp(),
-      });
-    }
-  }
-  await writer?.close();
-  return { issued, kept, deactivated };
+export async function rotateArtifactCode(db: Firestore, artifactId: string): Promise<{ oldCode: string; newCode: string }> {
+  const newCode = newQrCode();
+  const oldRef = db.collection(COL.artifacts).doc(artifactId);
+  const newRef = db.collection(COL.artifacts).doc(newCode);
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(oldRef);
+    const data = snap.data();
+    if (!data || data.isActive !== true) throw new Error(`artifact ${artifactId} is missing or inactive`);
+    const now = FieldValue.serverTimestamp();
+    tx.create(newRef, { ...data, qrCode: newCode, claimKey: (data.claimKey as string | undefined) ?? artifactId, isActive: true, createdAt: now });
+    tx.update(oldRef, { isActive: false, replacedBy: newCode, updatedAt: now });
+  });
+  return { oldCode: artifactId, newCode };
 }
 
-export async function seedGame(
-  db: Firestore,
-  raw: SeedData,
-  { rotateArtifactCodes = false }: { rotateArtifactCodes?: boolean } = {},
-): Promise<{ artifacts: SeededArtifact[]; codesKept: number }> {
+export async function seedGame(db: Firestore, raw: SeedData): Promise<{ artifacts: SeededArtifact[] }> {
   const data = seedDataSchema.parse(raw);
   const puzzleIds = new Set(data.puzzles.map((p) => p.id));
   for (const a of data.artifacts) {
@@ -201,13 +160,14 @@ export async function seedGame(
   // Artifacts keyed by QR code; reuse the code previously generated for the same seedKey.
   const existing = new Map<string, string>();
   for (const doc of (await db.collection(COL.artifacts).where("seedKey", "!=", null).get()).docs) {
-    existing.set(String(doc.get("seedKey")), doc.id);
+    // Rotated-out codes stay as inactive docs; only the current code is reused.
+    if (doc.get("isActive") === true) existing.set(String(doc.get("seedKey")), doc.id);
   }
   const artifacts: SeededArtifact[] = [];
   const artifactWriter = db.bulkWriter();
   for (const a of data.artifacts) {
     const qrCode = a.qrCode ?? existing.get(a.key) ?? newQrCode();
-    artifacts.push({ key: a.key, qrCode, name: a.name, qrType: a.qrType, puzzleId: a.puzzleId ?? null, teamCodes: {} });
+    artifacts.push({ key: a.key, qrCode, name: a.name, qrType: a.qrType, puzzleId: a.puzzleId ?? null });
     void artifactWriter.set(
       db.collection(COL.artifacts).doc(qrCode),
       {
@@ -228,20 +188,8 @@ export async function seedGame(
   }
   await artifactWriter.close();
 
-  // Per-team artifact codes, for real artifacts and decoys alike, so a decoy
-  // is indistinguishable from a real artifact by its code.
-  const seekerTeams = data.teams.filter((t) => t.type === "seeker").map((t) => t.id);
-  const { issued, kept } = await provisionArtifactCodes(
-    db,
-    artifacts.map((a) => a.qrCode),
-    seekerTeams,
-    { rotate: rotateArtifactCodes },
-  );
-  const byId = new Map(artifacts.map((a) => [a.qrCode, a]));
-  for (const c of issued) byId.get(c.artifactId)!.teamCodes[c.teamId] = c.code;
-
   for (const p of data.puzzles) {
     await mirrorPuzzle(db, p.id, (await db.collection(COL.puzzles).doc(p.id).get()).data());
   }
-  return { artifacts, codesKept: kept };
+  return { artifacts };
 }

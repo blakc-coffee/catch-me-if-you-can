@@ -12,15 +12,12 @@ import { submitPuzzleAnswer } from "../../src/puzzles/submitPuzzleAnswer.js";
 import { joinTeam } from "../../src/teams/joinTeam.js";
 import { deleteLocationHistory, uploadLocationBatch } from "../../src/telemetry/locationBatches.js";
 import { stopTracking, updateTelemetry } from "../../src/telemetry/updateTelemetry.js";
-import { provisionArtifactCodes, type SeededArtifact } from "../../scripts/seedGame.js";
-import { artifactCodeKey, newArtifactCode } from "../../src/lib/normalize.js";
+import { rotateArtifactCode, type SeededArtifact } from "../../scripts/seedGame.js";
 import { CODES, docData, expectReason, makeUser, onCampus, resetEmulators, seed } from "./helpers.js";
 
 let qr: Map<string, SeededArtifact>;
-/** Artifact doc id — the old static QR value, no longer redeemable. */
-const artifactId = (key: string) => qr.get(key)!.qrCode;
-/** The per-team QR code printed for `team`. */
-const code = (key: string, team = "alpha") => qr.get(key)!.teamCodes[team]!;
+/** The artifact's single QR code, shared by every team. */
+const code = (key: string) => qr.get(key)!.qrCode;
 const fix = (extra: Record<string, unknown> = {}) => ({ ...onCampus, accuracyM: 6, battery: 80, signal: "GOOD", clientTs: Date.now(), ...extra });
 const seeker = (team = "alpha", name?: string) => makeUser("seeker", team, name);
 const hider = (team = "ghost", name?: string) => makeUser("hider", team, name);
@@ -44,20 +41,16 @@ describe("compatibility with existing seekerdb documents", () => {
     expect(await docData(`users/${rec.uid}`)).toMatchObject({ name: "Seeker One", role: "seeker", teamId: "alpha", playerId: res.profile.playerId });
   });
 
-  it("no longer redeems a legacy static QR code; a per-team code for the same artifact claims it and solves a plaintext-answer puzzle", async () => {
+  it("claims an artifact keyed by its printed QR code and solves a plaintext-answer puzzle", async () => {
     const now = Timestamp.now();
     await db().doc("puzzles/croJmpXUZnLSYZCYKEH7").set({ title: "Puzzle 1", question: "Sample question", answer: "Secret", createdAt: now });
     await mirrorPuzzle(db(), "croJmpXUZnLSYZCYKEH7", (await db().doc("puzzles/croJmpXUZnLSYZCYKEH7").get()).data());
     await db().doc("artifacts/QR-KEY-001").set({ qrCode: "QR-KEY-001", qrType: "correct", name: "Golden Key", description: "The real artifact", areaId: "academic-1", puzzleId: "croJmpXUZnLSYZCYKEH7", redirectUrl: null, isActive: true, createdAt: now });
     await db().doc("artifacts/QR-DECOY-001").set({ qrCode: "QR-DECOY-001", qrType: "wrong", name: "Decoy Key", description: "A decoy artifact", areaId: "academic-1", puzzleId: null, redirectUrl: "https://example.com/wrong", isActive: true, createdAt: now });
-    const { issued } = await provisionArtifactCodes(db(), ["QR-KEY-001", "QR-DECOY-001"], ["alpha", "bravo"]);
-    const issuedCode = (artifact: string, team: string) => issued.find((c) => c.artifactId === artifact && c.teamId === team)!.code;
 
     const s = await seeker();
-    await expectReason(claimArtifact(s, { payload: "QR-KEY-001" }), "INVALID_ARTIFACT_CODE");
-    await expectReason(claimArtifact(s, { payload: "QR-DECOY-001" }), "INVALID_ARTIFACT_CODE");
-    await expect(claimArtifact(s, { payload: issuedCode("QR-DECOY-001", "alpha") })).resolves.toEqual({ status: "DECOY", artifactId: "QR-DECOY-001", name: "Decoy Key", redirectUrl: "https://example.com/wrong" });
-    const claimed = await claimArtifact(s, { payload: issuedCode("QR-KEY-001", "alpha") });
+    await expect(claimArtifact(s, { payload: "QR-DECOY-001" })).resolves.toEqual({ status: "DECOY", artifactId: "QR-DECOY-001", name: "Decoy Key", redirectUrl: "https://example.com/wrong" });
+    const claimed = await claimArtifact(s, { payload: "QR-KEY-001" });
     expect(claimed).toMatchObject({ status: "CLAIMED", points: 25, puzzle: { puzzleId: "croJmpXUZnLSYZCYKEH7", title: "Puzzle 1", question: "Sample question" } });
     await expect(submitPuzzleAnswer(s, { puzzleId: "croJmpXUZnLSYZCYKEH7", answer: " SECRET " })).resolves.toMatchObject({ status: "SOLVED", pointsAwarded: 100, tokensAwarded: 1 });
     const pub = await docData<Record<string, unknown>>("puzzlePublic/croJmpXUZnLSYZCYKEH7");
@@ -275,106 +268,100 @@ describe("uploadLocationBatch", () => {
   });
 });
 
-describe("claimArtifact", () => {
-  it("rejects malformed, unknown and legacy static codes identically", async () => {
+describe("claimArtifact (one shared QR code per artifact)", () => {
+  it("rejects malformed and unknown codes identically", async () => {
     const s = await seeker();
     await expectReason(claimArtifact(s, { payload: "https://evil.example/qr" }), "INVALID_ARTIFACT_CODE");
     await expectReason(claimArtifact(s, { payload: "OV-does-not-exist" }), "INVALID_ARTIFACT_CODE");
     await expectReason(claimArtifact(s, { payload: ".." }), "INVALID_ARTIFACT_CODE");
-    await expectReason(claimArtifact(s, { payload: newArtifactCode() }), "INVALID_ARTIFACT_CODE");
-    await expectReason(claimArtifact(s, { payload: `${code("a01")}x` }), "INVALID_ARTIFACT_CODE");
-    // The artifact id (what a static printed QR used to hold) is not redeemable.
-    await expectReason(claimArtifact(s, { payload: artifactId("a01") }), "INVALID_ARTIFACT_CODE");
     expect((await db().collection("artifactClaims").get()).size).toBe(0);
   });
 
-  it("rejects another team's code — a photographed or shared QR — and leaves it valid for its owner", async () => {
-    const alpha = await seeker("alpha");
-    const bravoCode = code("a07", "bravo");
-    await expectReason(claimArtifact(alpha, { payload: bravoCode }), "INVALID_ARTIFACT_CODE");
-    expect((await docData("teams/alpha"))?.artifactsClaimed ?? 0).toBe(0);
-    expect((await db().collection("artifactClaims").get()).size).toBe(0);
-    await expect(claimArtifact(await seeker("bravo"), { payload: bravoCode })).resolves.toMatchObject({ status: "CLAIMED" });
-    // After bravo redeemed it, it is still worthless to alpha.
-    await expectReason(claimArtifact(alpha, { payload: bravoCode }), "INVALID_ARTIFACT_CODE");
-  });
-
-  it("does not reveal decoys through another team's code", async () => {
-    await expectReason(claimArtifact(await seeker("alpha"), { payload: code("d01", "bravo") }), "INVALID_ARTIFACT_CODE");
-  });
-
-  it("issues one active code per artifact and seeker team, stored only as a hash", async () => {
-    const docs = (await db().collection("artifactCodes").get()).docs;
-    expect(docs).toHaveLength(17 * 2);
-    expect(new Set(docs.map((d) => d.get("teamId")))).toEqual(new Set(["alpha", "bravo"]));
-    const plain = code("a01");
-    expect(docs.some((d) => d.id === artifactCodeKey(plain))).toBe(true);
-    expect(JSON.stringify(docs.map((d) => d.data()))).not.toContain(plain.slice(4));
-  });
-
-  it("keeps issued codes on re-seed and invalidates them on rotation", async () => {
-    const old = code("a08");
-    const reseeded = await seed();
-    expect(reseeded.get("a08")!.teamCodes).toEqual({});
-    await expect(claimArtifact(await seeker("alpha"), { payload: old })).resolves.toMatchObject({ status: "CLAIMED" });
-
-    const bravoOld = code("a09", "bravo");
-    const { issued } = await provisionArtifactCodes(db(), [artifactId("a09")], ["bravo"], { rotate: true });
-    await expectReason(claimArtifact(await seeker("bravo"), { payload: bravoOld }), "INVALID_ARTIFACT_CODE");
-    await expect(claimArtifact(await seeker("bravo"), { payload: issued[0]!.code })).resolves.toMatchObject({ status: "CLAIMED" });
-  });
-
-  it("claims once per team, atomically updating claim, unlock, team and player", async () => {
-    const s = await seeker("alpha");
-    const r = await claimArtifact(s, { payload: code("a11") });
-    expect(r).toMatchObject({ status: "CLAIMED", name: "Artifact 11", points: 25, teamArtifactsClaimed: 1, totalArtifacts: 15, puzzle: { puzzleId: "case-01", title: "The Programmer" } });
+  it("lets every team claim the same QR once, keeping claims, unlocks and points team-scoped", async () => {
+    const [alpha, bravo] = [await seeker("alpha"), await seeker("bravo")];
+    // 1. alpha claims.
+    await expect(claimArtifact(alpha, { payload: code("a11") })).resolves.toMatchObject({
+      status: "CLAIMED", points: 25, teamArtifactsClaimed: 1, totalArtifacts: 15, puzzle: { puzzleId: "case-01", title: "The Programmer" },
+    });
+    // 2. bravo claims the very same code.
+    await expect(claimArtifact(bravo, { payload: code("a11") })).resolves.toMatchObject({ status: "CLAIMED", teamArtifactsClaimed: 1, puzzle: { puzzleId: "case-01" } });
+    // 3–4. repeats by either team are rejected without changing anything.
+    const again = await expectReason(claimArtifact(alpha, { payload: code("a11") }), "ARTIFACT_ALREADY_CLAIMED");
+    expect(again.details).toMatchObject({ artifactId: code("a11"), puzzleId: "case-01" });
+    await expectReason(claimArtifact(bravo, { payload: ` ${code("a11")}\n` }), "ARTIFACT_ALREADY_CLAIMED");
+    // 10. each team got exactly one claim, one unlock and the points once.
     expect(await docData("teams/alpha")).toMatchObject({ artifactsClaimed: 1, score: 25 });
-    expect(await docData(`users/${s.uid}`)).toMatchObject({ score: 25 });
-    expect(await docData("puzzleUnlocks/alpha_case-01")).toMatchObject({ teamId: "alpha", artifactId: artifactId("a11") });
+    expect(await docData("teams/bravo")).toMatchObject({ artifactsClaimed: 1, score: 25 });
+    expect(await docData(`users/${alpha.uid}`)).toMatchObject({ score: 25 });
+    expect(await docData(`users/${bravo.uid}`)).toMatchObject({ score: 25 });
+    expect(await docData("puzzleUnlocks/alpha_case-01")).toMatchObject({ teamId: "alpha", artifactId: code("a11") });
+    expect(await docData("puzzleUnlocks/bravo_case-01")).toMatchObject({ teamId: "bravo", artifactId: code("a11") });
+    expect((await db().collection("artifactClaims").where("artifactId", "==", code("a11")).get()).size).toBe(2);
   });
 
-  it("fails duplicate claims — also from a teammate — without changing progress", async () => {
+  it("rejects a teammate's repeat of the team's claim", async () => {
     const [a, b] = [await seeker("alpha"), await seeker("alpha")];
     await claimArtifact(a, { payload: code("a01") });
-    const err = await expectReason(claimArtifact(b, { payload: ` ${code("a01")}\n` }), "ARTIFACT_ALREADY_CLAIMED");
-    expect(err.details).toMatchObject({ artifactId: artifactId("a01") });
+    await expectReason(claimArtifact(b, { payload: code("a01") }), "ARTIFACT_ALREADY_CLAIMED");
     expect(await docData("teams/alpha")).toMatchObject({ artifactsClaimed: 1, score: 25 });
-    // Another team claims the same artifact with its own code.
-    await expect(claimArtifact(await seeker("bravo"), { payload: code("a01", "bravo") })).resolves.toMatchObject({ status: "CLAIMED", teamArtifactsClaimed: 1 });
+    expect(await docData(`users/${b.uid}`)).toMatchObject({ score: 0 });
   });
 
-  it("is idempotent under concurrent scans by the whole team", async () => {
+  it("5. concurrent claims by one team produce exactly one success", async () => {
     const team = await Promise.all([seeker(), seeker(), seeker()]);
     const results = await Promise.allSettled(team.flatMap((s) => [claimArtifact(s, { payload: code("a02") }), claimArtifact(s, { payload: code("a02") })]));
     expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
     expect(await docData("teams/alpha")).toMatchObject({ artifactsClaimed: 1, score: 25 });
   });
 
-  it("awards only the owning team under concurrent redemption of a shared code", async () => {
-    const [owner, thief1, thief2] = [await seeker("bravo"), await seeker("alpha"), await seeker("alpha")];
-    const shared = code("a10", "bravo");
-    const results = await Promise.allSettled([owner, thief1, thief2].map((s) => claimArtifact(s, { payload: shared })));
-    expect(results.map((r) => r.status)).toEqual(["fulfilled", "rejected", "rejected"]);
-    expect((await docData("teams/alpha"))?.score ?? 0).toBe(0);
+  it("6. concurrent claims by different teams both succeed", async () => {
+    const players = await Promise.all([seeker("alpha"), seeker("alpha"), seeker("bravo"), seeker("bravo")]);
+    const results = await Promise.allSettled(players.map((s) => claimArtifact(s, { payload: code("a03") })));
+    const wins = results.flatMap((r, i) => (r.status === "fulfilled" ? [i < 2 ? "alpha" : "bravo"] : []));
+    expect(wins.sort()).toEqual(["alpha", "bravo"]);
+    expect(await docData("teams/alpha")).toMatchObject({ artifactsClaimed: 1, score: 25 });
     expect(await docData("teams/bravo")).toMatchObject({ artifactsClaimed: 1, score: 25 });
   });
 
-  it("returns DECOY with the redirect for wrong codes and awards nothing", async () => {
-    const s = await seeker();
-    await expect(claimArtifact(s, { payload: code("d01") })).resolves.toMatchObject({ status: "DECOY", name: "Decoy Key", redirectUrl: "https://example.com/wrong" });
-    expect((await docData("teams/alpha"))?.score ?? 0).toBe(0);
+  it("7. decoys return DECOY with the redirect for every team and award nothing", async () => {
+    for (const team of ["alpha", "bravo"]) {
+      await expect(claimArtifact(await seeker(team), { payload: code("d01") })).resolves.toMatchObject({ status: "DECOY", name: "Decoy Key", redirectUrl: "https://example.com/wrong" });
+      expect((await docData(`teams/${team}`))?.score ?? 0).toBe(0);
+    }
+    expect((await db().collection("artifactClaims").get()).size).toBe(0);
   });
 
-  it("refuses hiders, team-less seekers, eliminated players, revoked codes, inactive artifacts and ended games", async () => {
-    await expectReason(claimArtifact(await hider(), { payload: code("a03") }), "ROLE_NOT_ALLOWED");
-    await expectReason(claimArtifact(await makeUser("seeker"), { payload: code("a03") }), "NO_TEAM");
+  it("8. a rotated code replaces the old one for everyone without allowing a second claim", async () => {
+    const alpha = await seeker("alpha");
+    await claimArtifact(alpha, { payload: code("a06") });
+    const { newCode } = await rotateArtifactCode(db(), code("a06"));
+    // The old code is dead for every team.
+    await expectReason(claimArtifact(await seeker("bravo"), { payload: code("a06") }), "INVALID_ARTIFACT_CODE");
+    // alpha already has this artifact: the new code does not pay out twice.
+    await expectReason(claimArtifact(alpha, { payload: newCode }), "ARTIFACT_ALREADY_CLAIMED");
+    // bravo claims it with the new code.
+    await expect(claimArtifact(await seeker("bravo"), { payload: newCode })).resolves.toMatchObject({ status: "CLAIMED" });
+    expect(await docData("teams/alpha")).toMatchObject({ artifactsClaimed: 1, score: 25 });
+    expect(await docData("teams/bravo")).toMatchObject({ artifactsClaimed: 1, score: 25 });
+    // The total still counts the artifact once, and a re-seed keeps the new code.
+    const reseeded = await seed();
+    expect(reseeded.get("a06")!.qrCode).toBe(newCode);
+    await expect(claimArtifact(await seeker("bravo"), { payload: code("a08") })).resolves.toMatchObject({ totalArtifacts: 15 });
+  });
+
+  it("9. inactive (revoked) artifacts are rejected for every team", async () => {
+    await db().doc(`artifacts/${code("a04")}`).update({ isActive: false });
+    await expectReason(claimArtifact(await seeker("alpha"), { payload: code("a04") }), "INVALID_ARTIFACT_CODE");
+    await expectReason(claimArtifact(await seeker("bravo"), { payload: code("a04") }), "INVALID_ARTIFACT_CODE");
+    await expect(rotateArtifactCode(db(), code("a04"))).rejects.toThrow(/inactive/);
+  });
+
+  it("refuses hiders, team-less seekers, eliminated players and ended games", async () => {
+    await expectReason(claimArtifact(await hider(), { payload: code("a05") }), "ROLE_NOT_ALLOWED");
+    await expectReason(claimArtifact(await makeUser("seeker"), { payload: code("a05") }), "NO_TEAM");
     const s = await seeker();
     await eliminatePlayer(await makeUser("surveillance"), { uid: s.uid });
-    await expectReason(claimArtifact(s, { payload: code("a03") }), "PLAYER_ELIMINATED");
-    await db().doc(`artifactCodes/${artifactCodeKey(code("a12"))}`).update({ isActive: false });
-    await expectReason(claimArtifact(await seeker(), { payload: code("a12") }), "INVALID_ARTIFACT_CODE");
-    await db().doc(`artifacts/${artifactId("a04")}`).update({ isActive: false });
-    await expectReason(claimArtifact(await seeker(), { payload: code("a04") }), "INVALID_ARTIFACT_CODE");
+    await expectReason(claimArtifact(s, { payload: code("a05") }), "PLAYER_ELIMINATED");
     const s2 = await seeker();
     await setGameStatus(await makeUser("admin"), { status: "ended" });
     await expectReason(claimArtifact(s2, { payload: code("a05") }), "GAME_ENDED");

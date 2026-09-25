@@ -232,9 +232,8 @@ export interface DeleteLocationHistoryResponse {
 
 export interface ClaimArtifactRequest {
   /**
-   * Raw string decoded from a per-team artifact QR code. Each code is valid
-   * only for the team it was issued to; any other team gets
-   * INVALID_ARTIFACT_CODE, exactly as for an unknown code.
+   * Raw string decoded from the artifact's QR code (its qrCode). One shared
+   * code per artifact: every eligible team may claim it once.
    */
   payload: string;
 }

@@ -5,10 +5,8 @@
  *   Production:          npm run seed -- --production --project <id> --data <private.json>
  *
  * Production seeding requires an explicit private data file (answers and join
- * codes must not come from the committed example). Per-team artifact QR codes
- * issued by this run are written to seed-output/ (git-ignored) for printing;
- * codes issued earlier are kept and not re-exported (add --rotate-artifact-codes
- * to reissue every code and deactivate the old ones).
+ * codes must not come from the committed example). QR codes are written to
+ * seed-output/ (git-ignored) for printing.
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -26,7 +24,6 @@ const { values: args } = parseArgs({
     production: { type: "boolean", default: false },
     project: { type: "string" },
     data: { type: "string" },
-    "rotate-artifact-codes": { type: "boolean", default: false },
   },
 });
 if (args.production && (!args.project || !args.data)) {
@@ -40,20 +37,19 @@ db.settings({ ignoreUndefinedProperties: true });
 
 const dataPath = args.data ? path.resolve(args.data) : path.join(here, "seed-data.example.json");
 const data = JSON.parse(readFileSync(dataPath, "utf8"));
-const { artifacts, codesKept } = await seedGame(db, data, { rotateArtifactCodes: Boolean(args["rotate-artifact-codes"]) });
+const { artifacts } = await seedGame(db, data);
+
+const outDir = path.join(here, "..", "seed-output");
+mkdirSync(outDir, { recursive: true });
+const csv = [
+  "key,name,qrType,puzzleId,qrCode",
+  ...artifacts.map((a) => `${a.key},"${a.name}",${a.qrType},${a.puzzleId ?? ""},${a.qrCode}`),
+];
+const outFile = path.join(outDir, `${projectId}-qr-codes.csv`);
+writeFileSync(outFile, csv.join("\n") + "\n");
 
 console.log(`Seeded game on ${args.production ? projectId : `emulator (${projectId})`}.`);
-const rows = artifacts.flatMap((a) =>
-  Object.entries(a.teamCodes).map(([teamId, code]) => `${a.key},"${a.name}",${a.qrType},${a.puzzleId ?? ""},${a.qrCode},${teamId},${code}`),
-);
-if (rows.length > 0) {
-  const outDir = path.join(here, "..", "seed-output");
-  mkdirSync(outDir, { recursive: true });
-  const outFile = path.join(outDir, `${projectId}-artifact-codes-${Date.now()}.csv`);
-  writeFileSync(outFile, ["key,name,qrType,puzzleId,artifactId,teamId,code", ...rows].join("\n") + "\n", { mode: 0o600 });
-  console.log(`New per-team artifact codes (${rows.length}) → ${path.relative(process.cwd(), outFile)}`);
-}
-console.log(`Existing artifact codes kept: ${codesKept}`);
+console.log(`QR codes (${artifacts.length}) → ${path.relative(process.cwd(), outFile)}`);
 const teams = data.teams as { name: string; joinCode?: string }[];
 if (!args.production) {
   console.log(`Team codes: ${teams.filter((t) => t.joinCode).map((t) => `${t.name}=${t.joinCode}`).join(", ")}`);

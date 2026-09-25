@@ -63,20 +63,17 @@ describe("callable endpoints", () => {
     const profile = await call<{ name: string }, { profile: { role: string; teamId: string | null }; claimsUpdated: boolean }>("createOrSyncProfile")({ name: "E2E" });
     expect(profile.data).toMatchObject({ profile: { role: "seeker", teamId: null }, claimsUpdated: true });
 
-    await expectCallReason(call("claimArtifact")({ payload: qr.get("a11")!.teamCodes.alpha! }), "NO_TEAM");
+    await expectCallReason(call("claimArtifact")({ payload: qr.get("a11")!.qrCode }), "NO_TEAM");
     await expectCallReason(call("joinTeam")({ joinCode: "WRONG-CODE" }), "INVALID_JOIN_CODE");
     await expect(call("joinTeam")({ joinCode: CODES.alpha })).resolves.toMatchObject({ data: { role: "seeker", team: { teamId: "alpha" } } });
     expect((await user.getIdTokenResult(true)).claims).toMatchObject({ role: "seeker", teamId: "alpha" });
 
     await expect(call("updateTelemetry")({ ...onCampus, accuracyM: 5, clientTs: Date.now() })).resolves.toMatchObject({ data: { zoneId: "academic_1" } });
-    await expect(call("claimArtifact")({ payload: qr.get("d01")!.teamCodes.alpha! })).resolves.toMatchObject({ data: { status: "DECOY" } });
-    await expect(call("claimArtifact")({ payload: qr.get("a11")!.teamCodes.alpha! })).resolves.toMatchObject({
+    await expect(call("claimArtifact")({ payload: qr.get("d01")!.qrCode })).resolves.toMatchObject({ data: { status: "DECOY" } });
+    await expect(call("claimArtifact")({ payload: qr.get("a11")!.qrCode })).resolves.toMatchObject({
       data: { status: "CLAIMED", teamArtifactsClaimed: 1, puzzle: { puzzleId: "case-01" } },
     });
-    await expectCallReason(call("claimArtifact")({ payload: qr.get("a11")!.teamCodes.alpha! }), "ARTIFACT_ALREADY_CLAIMED");
-    // A code printed for another team (or the old static artifact id) is not redeemable.
-    await expectCallReason(call("claimArtifact")({ payload: qr.get("a12")!.teamCodes.bravo! }), "INVALID_ARTIFACT_CODE");
-    await expectCallReason(call("claimArtifact")({ payload: qr.get("a12")!.qrCode }), "INVALID_ARTIFACT_CODE");
+    await expectCallReason(call("claimArtifact")({ payload: qr.get("a11")!.qrCode }), "ARTIFACT_ALREADY_CLAIMED");
 
     // The team unlock lets the seeker read the answer-free puzzle text; the answer doc stays private.
     const db = getFirestore(app);

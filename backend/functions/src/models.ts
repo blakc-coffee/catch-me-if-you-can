@@ -4,7 +4,7 @@
  * part of that schema and keep their names; everything else is added and owned
  * by Cloud Functions.
  *
- * Collections not readable by any client: teamJoinCodes, artifactCodes, rateLimits.
+ * Collections not readable by any client: teamJoinCodes, rateLimits.
  * `puzzles` (holds plaintext answers) is readable only by admins, as before;
  * players read the answer-free mirror in `puzzlePublic`.
  */
@@ -28,7 +28,6 @@ export const COL = {
   puzzleClaims: "puzzleClaims",
   broadcasts: "broadcasts",
   teamJoinCodes: "teamJoinCodes",
-  artifactCodes: "artifactCodes",
   rateLimits: "rateLimits",
 } as const;
 
@@ -91,6 +90,13 @@ export interface ArtifactDoc {
   createdAt: Timestamp;
   /** Optional; defaults to ARTIFACT_DEFAULT_POINTS. */
   points?: number;
+  /**
+   * Stable identity for one-claim-per-team deduplication, kept when the QR code
+   * is rotated (see rotateArtifactCode). Missing means the doc id.
+   */
+  claimKey?: string;
+  /** Set on a rotated-out artifact doc: the doc id of its replacement. */
+  replacedBy?: string;
 }
 
 /** puzzles/{puzzleId} — existing, admin-only. `answer` may hold pipe-separated alternatives. */
@@ -200,18 +206,6 @@ export interface ArtifactClaimDoc {
   playerId: string;
   points: number;
   claimedAt: Timestamp;
-}
-
-/**
- * artifactCodes/{sha256(code)} — a per-team QR code for one artifact. The
- * printed code is a high-entropy bearer secret redeemable only by `teamId`;
- * only its hash is stored. Server-only (no client access).
- */
-export interface ArtifactCodeDoc {
-  artifactId: string;
-  teamId: string;
-  isActive: boolean;
-  createdAt: Timestamp;
 }
 
 /** puzzleUnlocks/{teamId_puzzleId} — lets the team read puzzlePublic/{puzzleId}. */
