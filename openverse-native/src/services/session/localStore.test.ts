@@ -114,6 +114,17 @@ describe("ScopedStore", () => {
     expect(await store.loadLocations(B1)).toEqual([sample(1)]);
   });
 
+  it("does not recreate a queue that was purged while its upload was in flight", async () => {
+    const kv = new MemoryKV();
+    const store = new ScopedStore(kv);
+    await store.activate(A1, true);
+    await store.appendLocations(A1, [sample(1), sample(2)]);
+    const uploading = await store.loadLocations(A1);
+    await store.purgeExcept({}); // sign-out
+    await store.removeUploadedLocations(A1, uploading.slice(0, 1));
+    expect(kv.map.size).toBe(0);
+  });
+
   it("serializes concurrent appends without losing samples", async () => {
     const store = new ScopedStore(new MemoryKV());
     await store.activate(A1, true);

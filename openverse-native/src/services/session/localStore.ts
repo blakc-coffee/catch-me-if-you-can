@@ -162,12 +162,18 @@ export class ScopedStore {
     });
   }
 
-  /** Removes exactly the uploaded samples from this scope's queue. */
+  /**
+   * Removes exactly the uploaded samples from this scope's queue. A queue that
+   * no longer exists (purged by sign-out or an account switch while the upload
+   * was in flight) is left deleted rather than recreated.
+   */
   removeUploadedLocations(scope: StorageScope, uploaded: StoredPosition[]): Promise<void> {
     return this.exclusive(async () => {
       const key = scopedKeys(scope).locations;
+      const raw = await this.kv.getItem(key);
+      if (raw === null) return;
       const uploadedKeys = new Set(uploaded.map(sampleKey));
-      const remaining = parseArray<StoredPosition>(await this.kv.getItem(key)).filter((s) => !uploadedKeys.has(sampleKey(s)));
+      const remaining = parseArray<StoredPosition>(raw).filter((s) => !uploadedKeys.has(sampleKey(s)));
       await this.kv.setItem(key, JSON.stringify(remaining));
     });
   }

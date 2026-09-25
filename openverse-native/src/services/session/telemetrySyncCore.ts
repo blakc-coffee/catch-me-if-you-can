@@ -82,6 +82,9 @@ export async function syncLocationQueue(deps: TelemetrySyncDeps, scope: StorageS
       if (denial) return { status: "denied", denial, uploaded, pending: await pending() };
       throw error;
     }
+    // Signed out or switched account while the upload was in flight: stop, and
+    // leave the (purged) queue alone.
+    if (!owns()) return { status: "skipped", reason: "account-mismatch", pending: await pending() };
     await deps.store.removeUploadedLocations(scope, source);
     uploaded += source.length;
   }

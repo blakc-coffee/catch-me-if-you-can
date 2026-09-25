@@ -85,6 +85,45 @@ describe("syncLocationQueue", () => {
     expect(t.live).toHaveLength(0);
   });
 
+  it("sign-out while an upload is pending: nothing more is sent and the purged queue is not recreated", async () => {
+    const t = setup(450);
+    await t.ready;
+    let release!: () => void;
+    t.deps.uploadLocationBatch = (data) =>
+      new Promise<void>((resolve) => {
+        t.batches.push(data);
+        release = resolve;
+      });
+    const sync = syncLocationQueue(t.deps, A, ALLOWED);
+    await new Promise((r) => setTimeout(r, 0));
+    // Sign-out happens while the first batch is in flight.
+    t.uid.current = null;
+    await t.store.purgeExcept({});
+    release();
+    await expect(sync).resolves.toMatchObject({ status: "skipped", reason: "account-mismatch", pending: 0 });
+    expect(t.batches).toHaveLength(1);
+    expect(t.live).toHaveLength(0);
+    expect(await t.store.loadLocations(A)).toEqual([]);
+    expect(await t.store.getActiveScope()).toBeNull();
+  });
+
+  it("an account switch while an upload is pending does not remove or upload anything for the new account", async () => {
+    const t = setup(3);
+    await t.ready;
+    let release!: () => void;
+    t.deps.uploadLocationBatch = (data) =>
+      new Promise<void>((resolve) => {
+        t.batches.push(data);
+        release = resolve;
+      });
+    const sync = syncLocationQueue(t.deps, A, ALLOWED);
+    await new Promise((r) => setTimeout(r, 0));
+    t.uid.current = "uidB";
+    release();
+    await expect(sync).resolves.toMatchObject({ status: "skipped", reason: "account-mismatch" });
+    expect(t.live).toHaveLength(0);
+  });
+
   it("reports a terminal server reason so the caller shuts tracking down, keeping unsent samples", async () => {
     const t = setup();
     await t.ready;
