@@ -128,6 +128,26 @@ export function stopTrackingByUser(deps: TrackingSessionDeps): Promise<ShutdownR
   return shutdownTracking(deps, "user-stopped", "none");
 }
 
+export interface SignOutProviders {
+  /** Signs out of the identity provider (Google) so the next sign-in can choose an account. */
+  signOutProvider(): Promise<void>;
+  /** Signs out of Firebase Auth; a no-op when already signed out. */
+  signOutFirebase(): Promise<void>;
+}
+
+/**
+ * User-initiated sign-out. Tracking shuts down first, while still signed in,
+ * so the live position can be hidden on the server and nothing queued can be
+ * uploaded later under another account; all account-scoped local state is
+ * deleted. Provider and network failures never block the Firebase sign-out.
+ */
+export async function signOut(deps: TrackingSessionDeps, providers: SignOutProviders): Promise<ShutdownReport> {
+  const report = await shutdownTracking(deps, "signed-out", "all");
+  await attempt(report.failures, "provider-sign-out", deps, () => providers.signOutProvider());
+  await providers.signOutFirebase();
+  return report;
+}
+
 export interface BackgroundAuthorization {
   profile: ProfileSnapshot | null;
   game: GameSnapshot | null;
@@ -139,15 +159,23 @@ export type BackgroundResult = "appended" | "refused-no-scope" | "refused-accoun
  * Gate for the headless background task. Samples are appended only into the
  * persisted active scope, only while it is collecting, and only while the
  * authenticated user is that scope's owner. Every `recheckMs` the task also
- * re-reads profile and game state; a definitive denial stops tracking, while
- * a failed read (offline) keeps collecting so the same account can sync later.
+ * re-reads profile and game state; a definitive denial stops tracking. A
+ * failed read (offline) keeps collecting so the same account can sync later,
+ * and the next attempt backs off exponentially from `retryBaseMs` up to
+ * `retryMaxMs` instead of retrying on every sample.
  */
 export function createBackgroundGate(
   deps: TrackingSessionDeps,
   fetchAuthorization: (uid: string) => Promise<BackgroundAuthorization>,
-  { recheckMs = 60_000, now = () => Date.now() }: { recheckMs?: number; now?: () => number } = {},
+  {
+    recheckMs = 60_000,
+    retryBaseMs = 30_000,
+    retryMaxMs = 10 * 60_000,
+    now = () => Date.now(),
+  }: { recheckMs?: number; retryBaseMs?: number; retryMaxMs?: number; now?: () => number } = {},
 ) {
-  let lastCheck = Number.NEGATIVE_INFINITY;
+  let nextCheckAt = Number.NEGATIVE_INFINITY;
+  let consecutiveFailures = 0;
   return async function onSamples(samples: StoredPosition[]): Promise<BackgroundResult> {
     const active = await deps.store.getActiveScope().catch(() => null);
     if (!active?.collecting) {
@@ -159,22 +187,27 @@ export function createBackgroundGate(
       await shutdownTracking(deps, uid ? "account-changed" : "signed-out", uid ? { keepUid: uid } : "all");
       return "refused-account";
     }
-    if (now() - lastCheck >= recheckMs) {
+    if (now() >= nextCheckAt) {
+      let auth: BackgroundAuthorization | null = null;
       try {
-        const auth = await fetchAuthorization(uid);
-        lastCheck = now();
+        auth = await fetchAuthorization(uid);
+        consecutiveFailures = 0;
+        nextCheckAt = now() + recheckMs;
+      } catch (error) {
+        consecutiveFailures += 1;
+        nextCheckAt = now() + Math.min(retryMaxMs, retryBaseMs * 2 ** (consecutiveFailures - 1));
+        deps.log?.("background authorization check failed; collecting offline", error);
+      }
+      if (auth) {
         const decision = evaluateTracking({ uid, profile: auth.profile, game: auth.game });
-        const eventId = eventIdOf(auth.game);
         if (decision.allowed === false) {
           await shutdownTracking(deps, decision.reason, "none");
           return "refused-denied";
         }
-        if (!sameScope(active, { uid, eventId })) {
+        if (!sameScope(active, { uid, eventId: eventIdOf(auth.game) })) {
           await shutdownTracking(deps, "game-not-active", "none");
           return "refused-denied";
         }
-      } catch (error) {
-        deps.log?.("background authorization check failed; collecting offline", error);
       }
     }
     const appended = await deps.store.appendLocations(createScope(active.uid, active.eventId), samples);

@@ -1,5 +1,7 @@
+import { Platform } from "react-native";
 import { getAuth } from "@react-native-firebase/auth";
 import { doc, getDocFromServer, getFirestore } from "@react-native-firebase/firestore";
+import { GoogleSignin } from "@react-native-google-signin/google-signin";
 import { getCallableReason, stopRemoteTracking, updateTelemetry, uploadLocationBatch } from "../firebase/callables";
 import { startLocationUpdates, stopLocationUpdates } from "../locationService";
 import { localStore } from "../storage";
@@ -43,10 +45,21 @@ export function syncLocationQueue(scope: StorageScope, decision: TrackingDecisio
   );
 }
 
-/** Stops tracking and hides the live position while still signed in, deletes local state, then signs out. */
+/**
+ * Sign-out: stops the background task, hides the live position while still
+ * signed in (skipped when offline), deletes this device's account-scoped
+ * state, then signs out of Firebase and Google so the next sign-in can pick a
+ * different account. Safe offline and safe to call repeatedly.
+ */
 export async function signOutSafely(): Promise<void> {
-  await session.shutdownTracking(sessionDeps, "signed-out", "all");
-  await getAuth().signOut();
+  await session.signOut(sessionDeps, {
+    signOutProvider: async () => {
+      if (Platform.OS !== "web") await GoogleSignin.signOut();
+    },
+    signOutFirebase: async () => {
+      if (getAuth().currentUser) await getAuth().signOut();
+    },
+  });
 }
 
 /** Headless background-task gate (see createBackgroundGate). */

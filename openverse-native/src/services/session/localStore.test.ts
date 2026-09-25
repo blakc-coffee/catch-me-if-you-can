@@ -6,7 +6,7 @@ import { MemoryKV, sample } from "./testSupport";
 const A1 = createScope("uidA", "event-1");
 const A2 = createScope("uidA", "event-2");
 const B1 = createScope("uidB", "event-1");
-const progress = { claimedArtifactIds: ["art-1"], solvedPuzzleIds: [], lastScannedPayload: null, activePuzzle: null, teamArtifactsClaimed: 1 };
+const progress = { claimedArtifactIds: ["art-1"], lastScannedPayload: null, puzzles: {}, activePuzzleId: null };
 
 describe("storage scope", () => {
   it("rejects anything that is not a well-formed uid / event id", () => {

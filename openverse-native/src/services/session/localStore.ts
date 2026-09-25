@@ -1,4 +1,5 @@
 import type { GameState, StoredPosition } from "../../types";
+import { initialGameState, normalizeGameState } from "./gameState";
 import {
   ACTIVE_SCOPE_KEY,
   KEY_PREFIX,
@@ -24,13 +25,7 @@ export interface KeyValueStore {
 
 export const MAX_LOCATION_SAMPLES = 500;
 
-export const initialGameState: GameState = {
-  claimedArtifactIds: [],
-  solvedPuzzleIds: [],
-  lastScannedPayload: null,
-  activePuzzle: null,
-  teamArtifactsClaimed: null,
-};
+export { initialGameState };
 
 function parseArray<T>(raw: string | null): T[] {
   if (!raw) return [];
@@ -99,7 +94,7 @@ export class ScopedStore {
     const raw = await this.kv.getItem(scopedKeys(scope).game);
     if (!raw) return initialGameState;
     try {
-      return { ...initialGameState, ...(JSON.parse(raw) as Partial<GameState>) };
+      return normalizeGameState(JSON.parse(raw));
     } catch {
       return initialGameState;
     }

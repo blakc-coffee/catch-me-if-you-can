@@ -28,6 +28,7 @@ export const CALLABLES = {
   claimArtifact: "claimArtifact",
   submitPuzzleAnswer: "submitPuzzleAnswer",
   createBroadcast: "createBroadcast",
+  getMissionState: "getMissionState",
 } as const;
 
 export type ErrorReason =
@@ -276,6 +277,34 @@ export type SubmitPuzzleAnswerResponse =
       solvedByYourTeam: boolean;
       solvedBy: { playerId: string; name: string; teamName: string };
     };
+
+// ---------------------------------------------------------------- mission state
+
+export type GetMissionStateRequest = Record<string, never>;
+
+/** A puzzle the caller's team can open: unlocked by an artifact claim (seekers) or in the hider audience. */
+export interface MissionPuzzleDTO extends PuzzleDTO {
+  /** When the team unlocked it (seekers); null for audience puzzles. */
+  unlockedAtMs: number | null;
+  /** Someone solved it (first-solve lockout: it can no longer be won). */
+  solved: boolean;
+  solvedByYourTeam: boolean;
+}
+
+/**
+ * Read-only snapshot of the caller's mission: game, team progress and the
+ * puzzles the team can open. Contains no answers. Players (seeker/hider) on a
+ * team only; eliminated players may still read it.
+ */
+export interface GetMissionStateResponse {
+  eventId: string;
+  gameStatus: GameStatus;
+  team: TeamDTO;
+  /** Active real (non-decoy) artifacts in the game. */
+  totalArtifacts: number;
+  /** Oldest unlock first. */
+  puzzles: MissionPuzzleDTO[];
+}
 
 // ---------------------------------------------------------------- broadcasts
 

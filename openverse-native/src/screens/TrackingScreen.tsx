@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { AppShell } from "../components/AppShell";
 import { Card, Eyebrow, PrimaryButton } from "../components/Primitives";
@@ -7,6 +7,7 @@ import { localStore } from "../services/storage";
 import { deleteRemoteLocationHistory } from "../services/firebase/callables";
 import { sameScope, type StorageScope } from "../services/session/scope";
 import { enforceAuthorization, startTracking, stopTrackingByUser, syncLocationQueue } from "../services/session/sessionRuntime";
+import { trackingSyncKey } from "../services/session/startup";
 import type { TrackingDecision } from "../services/session/trackingPolicy";
 import { colors } from "../theme";
 import type { AppRoute, StoredPosition } from "../types";
@@ -23,12 +24,18 @@ const DENIAL_MESSAGES: Record<string, string> = {
   "profile-missing": "Your profile is still being set up.",
 };
 
-export function TrackingScreen({ active, scope, decision, onTrackingChange, onNavigate }: { active: boolean; scope: StorageScope | null; decision: TrackingDecision; onTrackingChange: (active: boolean) => void; onNavigate: (route: AppRoute) => void }) {
+export function TrackingScreen({ active, scope, decision, onTrackingChange, onSignOut, onNavigate }: { active: boolean; scope: StorageScope | null; decision: TrackingDecision; onTrackingChange: (active: boolean) => void; onSignOut: () => Promise<void>; onNavigate: (route: AppRoute) => void }) {
   const [busy, setBusy] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  // Latest values for the sync, without making every profile/game snapshot re-run it.
+  const latestProps = useRef({ scope, decision });
+  latestProps.current = { scope, decision };
+  const syncKey = trackingSyncKey(scope, decision);
   const [samples, setSamples] = useState<StoredPosition[]>([]);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
+    const { scope, decision } = latestProps.current;
     if (!scope) {
       setSamples([]);
       onTrackingChange(false);
@@ -54,9 +61,22 @@ export function TrackingScreen({ active, scope, decision, onTrackingChange, onNa
     } catch {
       setSyncMessage("Locations are safely queued for the next sync.");
     }
-  }, [decision, onTrackingChange, scope]);
+  }, [onTrackingChange]);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  // Sync when the screen opens and when the account, event or tracking
+  // authorization changes; explicit actions below call refresh() themselves.
+  useEffect(() => { void refresh(); }, [refresh, syncKey]);
+
+  const signOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      await onSignOut();
+    } catch {
+      Alert.alert("Sign-out incomplete", "Local tracking was stopped. Try signing out again.");
+      setSigningOut(false);
+    }
+  };
 
   const toggleTracking = async () => {
     if (!scope) return;
@@ -135,6 +155,10 @@ export function TrackingScreen({ active, scope, decision, onTrackingChange, onNa
       </Card>
 
       {samples.length > 0 ? <Pressable onPress={clearHistory}><Text style={styles.clear}>Clear stored location history</Text></Pressable> : null}
+
+      <Pressable accessibilityRole="button" disabled={signingOut} onPress={() => void signOut()} style={styles.signOut}>
+        <Text style={styles.signOutText}>{signingOut ? "Signing out…" : "Sign out"}</Text>
+      </Pressable>
     </AppShell>
   );
 }
@@ -151,5 +175,7 @@ const styles = StyleSheet.create({
   notice: { marginTop: 18 },
   noticeTitle: { color: colors.text, fontSize: 14, fontWeight: "700" },
   clear: { color: colors.error, textAlign: "center", fontSize: 11, marginTop: 22 },
-  syncMessage: { color: colors.body, fontSize: 11, textAlign: "center", marginTop: 12 }
+  syncMessage: { color: colors.body, fontSize: 11, textAlign: "center", marginTop: 12 },
+  signOut: { marginTop: 30, paddingVertical: 12, borderRadius: 10, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.edge, alignItems: "center" },
+  signOutText: { color: colors.text, fontSize: 13, fontWeight: "700" }
 });

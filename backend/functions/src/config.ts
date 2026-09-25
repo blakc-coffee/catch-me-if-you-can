@@ -91,4 +91,5 @@ export const RATE_LIMITS = {
   puzzleAnswerPerPuzzle: { limit: 10, windowMs: 60_000 },
   puzzleAnswerGlobal: { limit: 60, windowMs: 60_000 },
   adminAction: { limit: 60, windowMs: 60_000 },
+  missionState: { limit: 60, windowMs: 60_000 },
 } as const;

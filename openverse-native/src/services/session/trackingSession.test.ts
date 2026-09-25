@@ -7,6 +7,7 @@ import {
   enforceAuthorization,
   handleAuthChange,
   shutdownTracking,
+  signOut,
   startTracking,
   stopTrackingByUser,
   type BackgroundAuthorization,
@@ -269,5 +270,107 @@ describe("user stop", () => {
     await stopTrackingByUser(d.deps);
     await expectStopped(d);
     expect(await d.store.loadLocations(A)).toHaveLength(2);
+  });
+});
+
+describe("user sign-out", () => {
+  function providers(d: FakeDevice, failGoogle = false) {
+    const order: string[] = [];
+    return {
+      order,
+      p: {
+        signOutProvider: async () => {
+          order.push(`google:${d.uid.current}`);
+          if (failGoogle) throw new Error("google unavailable");
+        },
+        signOutFirebase: async () => {
+          order.push(`firebase:${d.uid.current}`);
+          d.uid.current = null;
+        },
+      },
+    };
+  }
+
+  it("stops tracking and hides the live position before signing out, then clears local state", async () => {
+    const d = await trackingAsA();
+    const { order, p } = providers(d);
+    const report = await signOut(d.deps, p);
+    expect(report.failures).toEqual([]);
+    expect(d.calls.stopRemote).toBe(1);
+    expect(order).toEqual(["google:uidA", "firebase:uidA"]);
+    await expectStopped(d);
+    expect(d.kv.map.size).toBe(0);
+  });
+
+  it("still signs out offline and when Google sign-out fails", async () => {
+    const d = await trackingAsA();
+    d.failures.stopRemote = true;
+    const { order, p } = providers(d, true);
+    const report = await signOut(d.deps, p);
+    expect(report.failures).toEqual(["stop-remote-tracking", "provider-sign-out"]);
+    expect(order.at(-1)).toBe("firebase:uidA");
+    expect(d.uid.current).toBeNull();
+    expect(d.kv.map.size).toBe(0);
+  });
+
+  it("is idempotent, and the next account starts clean with nothing to upload", async () => {
+    const d = await trackingAsA();
+    const { p } = providers(d);
+    await signOut(d.deps, p);
+    await expect(signOut(d.deps, p)).resolves.toMatchObject({ failures: [] });
+    await handleAuthChange(d.deps, null);
+    d.uid.current = "uidB";
+    await handleAuthChange(d.deps, "uidB");
+    expect(await d.store.loadLocations(A)).toEqual([]);
+    expect(await d.store.getActiveScope()).toBeNull();
+    expect(await startTracking(d.deps, B, ALLOWED)).toEqual({ ok: true });
+    expect(await d.store.loadLocations(B)).toEqual([]);
+  });
+});
+
+describe("background re-check backoff while offline", () => {
+  it("does not re-check on every sample, and backs off exponentially up to a cap", async () => {
+    const d = await trackingAsA();
+    let clock = 0;
+    const attempts: number[] = [];
+    const gate = createBackgroundGate(d.deps, async () => {
+      attempts.push(clock);
+      throw new Error("offline");
+    }, { recheckMs: 60_000, retryBaseMs: 30_000, retryMaxMs: 120_000, now: () => clock });
+    // A sample every 15 s for 10 minutes.
+    for (clock = 0; clock <= 600_000; clock += 15_000) expect(await gate([sample(clock / 15_000 + 3)])).toBe("appended");
+    expect(attempts).toEqual([0, 30_000, 90_000, 210_000, 330_000, 450_000, 570_000]);
+    expect(await d.store.loadLocations(A)).toHaveLength(2 + 41);
+  });
+
+  it("returns to the normal interval after a successful check", async () => {
+    const d = await trackingAsA();
+    let clock = 0;
+    let online = false;
+    const attempts: number[] = [];
+    const gate = createBackgroundGate(d.deps, async () => {
+      attempts.push(clock);
+      if (!online) throw new Error("offline");
+      return { profile: seeker, game: live };
+    }, { recheckMs: 60_000, retryBaseMs: 30_000, now: () => clock });
+    await gate([sample(3)]); // fails at 0 → retry at 30 s
+    online = true;
+    clock = 30_000;
+    await gate([sample(4)]); // succeeds → next at 90 s
+    clock = 75_000;
+    await gate([sample(5)]);
+    clock = 90_000;
+    await gate([sample(6)]);
+    expect(attempts).toEqual([0, 30_000, 90_000]);
+  });
+
+  it("still refuses immediately on an account change, whatever the backoff state", async () => {
+    const d = await trackingAsA();
+    const gate = createBackgroundGate(d.deps, async () => {
+      throw new Error("offline");
+    });
+    await gate([sample(3)]);
+    d.uid.current = "uidB";
+    expect(await gate([sample(4)])).toBe("refused-account");
   });
 });

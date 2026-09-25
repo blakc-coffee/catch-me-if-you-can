@@ -11,7 +11,7 @@ setGlobalOptions({ region: REGION });
 
 export { assignUser, createOrSyncProfile } from "./auth/index.js";
 export { joinTeam } from "./teams/index.js";
-export { eliminatePlayer, setGameStatus } from "./game/index.js";
+export { eliminatePlayer, getMissionState, setGameStatus } from "./game/index.js";
 export { deleteLocationHistory, stopTracking, updateTelemetry, uploadLocationBatch } from "./telemetry/index.js";
 export { claimArtifact } from "./artifacts/index.js";
 export { onPuzzleWritten, submitPuzzleAnswer } from "./puzzles/index.js";

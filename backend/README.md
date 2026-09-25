@@ -96,6 +96,7 @@ Roles are lower-case: `seeker`, `hider`, `surveillance`, `admin`. An `answer` ma
 | `deleteLocationHistory` | owner | erases all own batches · 5/hour |
 | `claimArtifact` | active seeker on a team, game active | payload must be a per-team code issued to the caller's team (`artifactCodes`); `wrong` → `DECOY` + `redirectUrl`; `correct` → one claim per team, unlocks `puzzleId` · 30/min |
 | `submitPuzzleAnswer` | seeker (team unlock required) or hider (`hider` ∈ audience) | server compares with `puzzles/{id}.answer`; transaction on `puzzleClaims/{id}` gives exactly one winning team · 10/min per puzzle, 60/min overall |
+| `getMissionState` | seeker/hider on a team (also when eliminated) | read-only: game status + `eventId`, team progress, total active artifacts, and the team's case files (answer-free) · 60/min |
 | `createBroadcast` | surveillance, admin | reads live `seekers/*` in the same transaction as the cooldown (600 s) |
 | `onPuzzleWritten` (trigger) | — | mirrors `puzzles/{id}` → `puzzlePublic/{id}` without `answer` |
 

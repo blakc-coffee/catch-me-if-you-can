@@ -10,6 +10,8 @@ import {
   type SubmitPuzzleAnswerRequest,
   type SubmitPuzzleAnswerResponse,
   type DeleteLocationHistoryResponse,
+  type GetMissionStateRequest,
+  type GetMissionStateResponse,
   type StopTrackingResponse,
   type UpdateTelemetryRequest,
   type UpdateTelemetryResponse,
@@ -49,6 +51,9 @@ export const updateTelemetry = (data: UpdateTelemetryRequest) =>
 
 export const uploadLocationBatch = (data: UploadLocationBatchRequest) =>
   call<UploadLocationBatchRequest, UploadLocationBatchResponse>(CALLABLES.uploadLocationBatch, data);
+
+export const getMissionState = () =>
+  call<GetMissionStateRequest, GetMissionStateResponse>(CALLABLES.getMissionState, {});
 
 export const stopRemoteTracking = () =>
   call<Record<string, never>, StopTrackingResponse>(CALLABLES.stopTracking, {});

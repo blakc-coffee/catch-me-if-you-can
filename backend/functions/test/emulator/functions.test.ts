@@ -5,6 +5,7 @@ import { assignUser } from "../../src/auth/assignUser.js";
 import { createOrSyncProfile } from "../../src/auth/profile.js";
 import { createBroadcast } from "../../src/broadcasts/createBroadcast.js";
 import { eliminatePlayer, setGameStatus } from "../../src/game/admin.js";
+import { getMissionState } from "../../src/game/missionState.js";
 import { auth, db } from "../../src/lib/firebase.js";
 import { mirrorPuzzle } from "../../src/puzzles/mirror.js";
 import { submitPuzzleAnswer } from "../../src/puzzles/submitPuzzleAnswer.js";
@@ -430,6 +431,47 @@ describe("submitPuzzleAnswer", () => {
     const h = await hider();
     for (let i = 0; i < 10; i++) await expect(submitPuzzleAnswer(h, { puzzleId: "ch-02", answer: `guess ${i}` })).resolves.toMatchObject({ status: "INCORRECT" });
     await expectReason(submitPuzzleAnswer(h, { puzzleId: "ch-02", answer: "22" }), "RATE_LIMITED");
+  });
+});
+
+describe("getMissionState", () => {
+  it("reports real, zeroed progress for a new seeker", async () => {
+    const r = await getMissionState(await seeker("alpha"), {});
+    expect(r).toMatchObject({ gameStatus: "active", totalArtifacts: 15, puzzles: [], team: { teamId: "alpha", name: "Team Alpha", score: 0, tokens: 0, artifactsClaimed: 0, puzzlesSolved: 0 } });
+    expect(r.eventId).toBe((await docData<{ eventId: string }>("game/state"))!.eventId);
+  });
+
+  it("lists every puzzle the team unlocked, oldest first, without answers, and tracks solves", async () => {
+    const [a, mate] = [await seeker("alpha"), await seeker("alpha")];
+    await claimArtifact(a, { payload: code("a11") });
+    const first = await getMissionState(mate, {});
+    expect(first.team).toMatchObject({ artifactsClaimed: 1, score: 25 });
+    expect(first.puzzles).toEqual([
+      { puzzleId: "case-01", title: "The Programmer", question: expect.any(String), unlockedAtMs: expect.any(Number), solved: false, solvedByYourTeam: false },
+    ]);
+    expect(JSON.stringify(first)).not.toMatch(/dhh|answer/i);
+    await submitPuzzleAnswer(a, { puzzleId: "case-01", answer: "dhh" });
+    const after = await getMissionState(mate, {});
+    expect(after.puzzles[0]).toMatchObject({ solved: true, solvedByYourTeam: true });
+    expect(after.team).toMatchObject({ puzzlesSolved: 1, tokens: 1 });
+    // Another team neither sees alpha's unlock nor alpha's progress.
+    expect(await getMissionState(await seeker("bravo"), {})).toMatchObject({ puzzles: [], team: { teamId: "bravo", artifactsClaimed: 0 } });
+  });
+
+  it("shows hiders the puzzles addressed to them", async () => {
+    const r = await getMissionState(await hider("ghost"), {});
+    expect(r.puzzles.map((p) => p.puzzleId)).toEqual(["ch-01", "ch-02", "ch-03"]);
+    expect(r.team).toMatchObject({ teamId: "ghost", type: "hider" });
+  });
+
+  it("is role-aware: no team, staff and unknown input are refused; eliminated players can still read", async () => {
+    await expectReason(getMissionState(await makeUser("seeker"), {}), "NO_TEAM");
+    await expectReason(getMissionState(await makeUser("surveillance"), {}), "ROLE_NOT_ALLOWED");
+    await expectReason(getMissionState(await makeUser("admin"), {}), "ROLE_NOT_ALLOWED");
+    await expectReason(getMissionState(await seeker(), { teamId: "bravo" }), "INVALID_ARGUMENT");
+    const s = await seeker();
+    await eliminatePlayer(await makeUser("admin"), { uid: s.uid });
+    await expect(getMissionState(s, {})).resolves.toMatchObject({ team: { teamId: "alpha" } });
   });
 });
 

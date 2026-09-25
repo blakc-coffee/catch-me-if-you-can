@@ -8,6 +8,7 @@
     "android": "expo run:android",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "verify:bundle": "node scripts/verify-bundle.mjs",
     "prebuild": "expo prebuild",
     "build:apk": "npx eas-cli build --platform android --profile preview"
   },
