@@ -13,7 +13,8 @@
     "test:emulator": "vitest run --config vitest.emulator.config.ts",
     "seed": "tsx scripts/seed.ts",
     "grant-admin": "tsx scripts/grant-admin.ts",
-    "migrate": "tsx scripts/migrate.ts"
+    "migrate": "tsx scripts/migrate.ts",
+    "rotate-artifact": "tsx scripts/rotate-artifact.ts"
   },
   "dependencies": {
     "firebase-admin": "^14.5.0",

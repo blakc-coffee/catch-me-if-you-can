@@ -28,6 +28,7 @@ export const CALLABLES = {
   claimArtifact: "claimArtifact",
   submitPuzzleAnswer: "submitPuzzleAnswer",
   createBroadcast: "createBroadcast",
+  getMissionState: "getMissionState",
 } as const;
 
 export type ErrorReason =
@@ -49,7 +50,12 @@ export type ErrorReason =
   | "GAME_NOT_ACTIVE"
   | "GAME_ENDED"
   | "PLAYER_ELIMINATED"
-  | "TELEMETRY_CLOCK_SKEW"
+  | "TELEMETRY_STALE_FIX"
+  | "TELEMETRY_FUTURE_FIX"
+  | "TELEMETRY_NON_MONOTONIC"
+  | "TELEMETRY_LOW_ACCURACY"
+  | "TELEMETRY_OUT_OF_BOUNDS"
+  | "TELEMETRY_IMPLAUSIBLE_MOVEMENT"
   | "BATCH_ID_CONFLICT"
   | "SAMPLE_OUT_OF_RANGE"
   | "INVALID_ARTIFACT_CODE"
@@ -72,6 +78,31 @@ export interface CallableErrorDetails {
 
 export type PlayerStatus = "active" | "eliminated" | "suspended";
 export type GameStatus = "draft" | "active" | "paused" | "ended";
+
+/**
+ * Fields of game/state that signed-in clients read directly from Firestore.
+ * `eventId` scopes on-device state; a missing value means DEFAULT_EVENT_ID.
+ */
+export interface GameStateDTO {
+  status: GameStatus;
+  eventId?: string;
+}
+export const DEFAULT_EVENT_ID = "default";
+
+/**
+ * updateTelemetry rejections for a fix that should not become the live
+ * position. None of them is terminal: the client keeps tracking and sends a
+ * newer fix later. Terminal reasons are GAME_NOT_ACTIVE, GAME_ENDED,
+ * PLAYER_ELIMINATED, ACCOUNT_SUSPENDED, ROLE_NOT_ALLOWED and NO_TEAM.
+ */
+export const TELEMETRY_FIX_REJECTIONS = [
+  "TELEMETRY_STALE_FIX",
+  "TELEMETRY_FUTURE_FIX",
+  "TELEMETRY_NON_MONOTONIC",
+  "TELEMETRY_LOW_ACCURACY",
+  "TELEMETRY_OUT_OF_BOUNDS",
+  "TELEMETRY_IMPLAUSIBLE_MOVEMENT",
+] as const satisfies readonly ErrorReason[];
 
 export interface ProfileDTO {
   uid: string;
@@ -154,7 +185,7 @@ export interface UpdateTelemetryRequest {
   headingDeg?: number;
   battery?: number;
   signal?: "STRONG" | "GOOD" | "WEAK";
-  /** Device epoch ms when the fix was taken. */
+  /** Device epoch ms when the fix was taken. Must be newer than the last accepted fix. */
   clientTs: number;
 }
 export interface UpdateTelemetryResponse {
@@ -162,6 +193,7 @@ export interface UpdateTelemetryResponse {
   nextAllowedAtMs: number;
   zoneId: string | null;
   zoneName: string | null;
+  /** Always true: out-of-campus fixes are rejected with TELEMETRY_OUT_OF_BOUNDS. */
   inBounds: boolean;
 }
 
@@ -196,7 +228,10 @@ export interface DeleteLocationHistoryResponse {
 // ---------------------------------------------------------------- artifacts
 
 export interface ClaimArtifactRequest {
-  /** Raw string decoded from the QR code (the artifact's qrCode). */
+  /**
+   * Raw string decoded from the artifact's QR code (its qrCode). One shared
+   * code per artifact: every eligible team may claim it once.
+   */
   payload: string;
 }
 
@@ -241,6 +276,34 @@ export type SubmitPuzzleAnswerResponse =
       solvedByYourTeam: boolean;
       solvedBy: { playerId: string; name: string; teamName: string };
     };
+
+// ---------------------------------------------------------------- mission state
+
+export type GetMissionStateRequest = Record<string, never>;
+
+/** A puzzle the caller's team can open: unlocked by an artifact claim (seekers) or in the hider audience. */
+export interface MissionPuzzleDTO extends PuzzleDTO {
+  /** When the team unlocked it (seekers); null for audience puzzles. */
+  unlockedAtMs: number | null;
+  /** Someone solved it (first-solve lockout: it can no longer be won). */
+  solved: boolean;
+  solvedByYourTeam: boolean;
+}
+
+/**
+ * Read-only snapshot of the caller's mission: game, team progress and the
+ * puzzles the team can open. Contains no answers. Players (seeker/hider) on a
+ * team only; eliminated players may still read it.
+ */
+export interface GetMissionStateResponse {
+  eventId: string;
+  gameStatus: GameStatus;
+  team: TeamDTO;
+  /** Active real (non-decoy) artifacts in the game. */
+  totalArtifacts: number;
+  /** Oldest unlock first. */
+  puzzles: MissionPuzzleDTO[];
+}
 
 // ---------------------------------------------------------------- broadcasts
 

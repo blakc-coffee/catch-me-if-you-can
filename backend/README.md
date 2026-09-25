@@ -58,7 +58,7 @@ Roles are lower-case: `seeker`, `hider`, `surveillance`, `admin`. An `answer` ma
 
 | Collection | Contents | Client read access |
 |---|---|---|
-| `game/state` | `status` (`draft`/`active`/`paused`/`ended`), telemetry interval, broadcast cooldown, retention | signed-in |
+| `game/state` | `status` (`draft`/`active`/`paused`/`ended`), `eventId` (scopes on-device state), telemetry interval, broadcast cooldown, retention | signed-in |
 | `seekers/{uid}` | **latest** live telemetry only | owner; admin; surveillance when `active == true` |
 | `seekers/{uid}/locationBatches/{batchId}` | route history in batches (TTL) | owner; admin |
 | `artifactClaims/{teamId_hash(qrCode)}` | one claim per team per artifact | own team; staff |
@@ -89,22 +89,60 @@ Roles are lower-case: `seeker`, `hider`, `surveillance`, `admin`. An `answer` ma
 | `joinTeam` | seeker/hider (not staff) | hashed code; role := team type · 10/15 min |
 | `setGameStatus` | admin | creates `game/state` if missing; `ended` deactivates all live telemetry |
 | `eliminatePlayer` | surveillance, admin | idempotent |
-| `updateTelemetry` | active seeker on a team, game active | server derives zone/x/y; **1 per `telemetryMinIntervalSec`** (10 s) |
+| `updateTelemetry` | active seeker on a team, game active | plausibility checks (see *Location trust*); server derives zone/x/y; **1 per `telemetryMinIntervalSec`** (10 s) |
 | `stopTracking` | any | hides own live position · 30/min |
 | `uploadLocationBatch` | seeker (also after elimination/end) | ≤500 samples, ≤128 KiB; idempotent `batchId` (`DUPLICATE` / `BATCH_ID_CONFLICT`) · 30/min |
 | `deleteLocationHistory` | owner | erases all own batches · 5/hour |
-| `claimArtifact` | active seeker on a team, game active | looks up `artifacts/{payload}`; `wrong` → `DECOY` + `redirectUrl`; `correct` → one claim per team, unlocks `puzzleId` · 30/min |
+| `claimArtifact` | active seeker on a team, game active | looks up `artifacts/{payload}`; `wrong` → `DECOY` + `redirectUrl`; `correct` → one claim per team (every team may claim each artifact once), unlocks `puzzleId` · 30/min |
 | `submitPuzzleAnswer` | seeker (team unlock required) or hider (`hider` ∈ audience) | server compares with `puzzles/{id}.answer`; transaction on `puzzleClaims/{id}` gives exactly one winning team · 10/min per puzzle, 60/min overall |
+| `getMissionState` | seeker/hider on a team (also when eliminated) | read-only: game status + `eventId`, team progress, total active artifacts, and the team's case files (answer-free) · 60/min |
 | `createBroadcast` | surveillance, admin | reads live `seekers/*` in the same transaction as the cooldown (600 s) |
 | `onPuzzleWritten` (trigger) | — | mirrors `puzzles/{id}` → `puzzlePublic/{id}` without `answer` |
 
 Every callable also:
+- requires App Check in production when it is sensitive (see *App Check*);
 - caps the request at 4 KiB, except `uploadLocationBatch` (128 KiB);
 - rejects unknown fields;
 - returns a typed `details.reason` on errors;
 - replaces unexpected errors with a generic `INTERNAL`.
 
-**Note on QR codes:** in this schema the printed QR value *is* the artifact document ID. Rules hide artifact documents from seekers, and `claimArtifact` allows 30 attempts a minute. Guessable codes like `QR-KEY-001` are still weak, so for the real event print long random codes: the seed script generates `OV-` plus 16 random characters.
+### Artifact QR codes: one shared code per artifact
+
+Each artifact has **one QR code, and every team may claim it once** — this is the game rule. In this schema the printed QR value *is* the artifact document ID (`artifacts/{qrCode}`).
+
+- **One claim per team.** `claimArtifact` creates `artifactClaims/{teamId}_{hash}` inside a transaction, so a repeat claim by the same team (or a teammate), including simultaneous scans, fails with `ARTIFACT_ALREADY_CLAIMED`. Other teams are unaffected and claim the same artifact independently. Points, counters and puzzle unlocks are per team.
+- **Decoys** (`qrType: "wrong"`) return `DECOY` and the organiser's `redirectUrl` for every team and award nothing.
+- **Codes.** Rules hide artifact documents from players and `claimArtifact` allows 30 attempts a minute, but guessable codes like `QR-KEY-001` are still weak — print long random codes (the seed script generates `OV-` plus 16 random characters) and export them to `functions/seed-output/<project>-qr-codes.csv` (git-ignored).
+- **Revoking an artifact:** set `isActive: false` on its `artifacts` doc; its code then fails for every team.
+- **Rotating a code** (e.g. a code posted online): `npm run rotate-artifact -- --artifact <currentQrCode>` copies the artifact to a new random code and deactivates the old one, so the old code fails for everyone. The artifact's `claimKey` is carried over, so teams that already claimed it cannot claim it again with the new code. The new code goes to `functions/seed-output/<project>-rotated-<time>.csv`; re-seeding keeps it.
+
+### Location trust
+
+`updateTelemetry` rejects, with a stable `details.reason` and without clamping or rewriting anything:
+
+| Reason | Rule |
+|---|---|
+| `TELEMETRY_STALE_FIX` / `TELEMETRY_FUTURE_FIX` | fix older than 60 s, or more than 30 s ahead of server time |
+| `TELEMETRY_LOW_ACCURACY` | reported accuracy worse than 50 m |
+| `TELEMETRY_OUT_OF_BOUNDS` | outside the campus bounding box |
+| `TELEMETRY_NON_MONOTONIC` | not newer than the last accepted fix |
+| `TELEMETRY_IMPLAUSIBLE_MOVEMENT` | distance from the last accepted fix exceeds 10 m/s × elapsed time plus a jitter allowance (combined accuracy, capped at 40 m) |
+
+These rejections are not terminal: the app keeps tracking and sends a newer fix later. Limits are in `TELEMETRY_LIMITS` (`functions/src/config.ts`).
+
+- **Checks against state run in the transaction.** Game state, role, team, elimination and suspension are read inside the write transaction, together with the last accepted fix (`seekers/{uid}.fixServerMs`).
+- **Elapsed time uses the server clock.** It is the smaller of the device-reported interval and the server-observed interval plus 5 s. Backdating the previous fix or post-dating the new one therefore buys no extra distance.
+- **First fix:** a seeker with no accepted fix yet has no baseline, so only the stateless checks apply. The baseline survives `stopTracking`, so turning tracking off and on does not reset it. After a long gap, the allowed distance grows with the elapsed time.
+- **What this does not do.** These checks, App Check and rate limiting make spoofing harder and catch impossible sequences. They cannot prove that coordinates come from real GPS hardware. On a rooted or otherwise fully controlled device, a player can feed a mock location that moves at a plausible speed, and it will be accepted. Treat live positions as strong hints, not proof, and keep a human in the loop for eliminations. Route history (`uploadLocationBatch`) gets only range checks.
+
+### App Check
+
+The sensitive callables (`updateTelemetry`, `uploadLocationBatch`, `claimArtifact`, `submitPuzzleAnswer`, `joinTeam`) **require a valid App Check token in every deployed project by default**. The Functions emulator never enforces it. `ENFORCE_APP_CHECK` in `functions/.env.<projectId>` changes this:
+- unset: sensitive callables are enforced (the default);
+- `true`: every callable is enforced;
+- `false`: nothing is enforced. This is a temporary rollout escape hatch only, and it is logged at cold start.
+
+The Android app uses Play Integrity in release builds and the debug provider in development and emulator builds (`openverse-native/src/services/firebase/config.ts`).
 
 ## Local development (Emulator Suite)
 
@@ -120,7 +158,7 @@ npm run seed                # in another terminal: teams, areas, puzzles, 15 art
 `npm run seed` prints the following, all for the emulator:
 - **Dev accounts**, password `openverse-dev`: `admin@`, `surveillance@`, `hider1@` (team ghost), `seeker1@` (team alpha) and `seeker2@iiitkottayam.ac.in` (team bravo).
 - **Team codes:** `ALPHA-DEV-2026`, `BRAVO-DEV-2026`, `GHOST-DEV-2026`, `SHADE-DEV-2026`.
-- **QR codes** in `functions/seed-output/demo-openverse-qr-codes.csv` (git-ignored). Artifact `a11` unlocks the puzzle "The Programmer" (answer `dhh`).
+- **QR codes** in `functions/seed-output/demo-openverse-qr-codes.csv` (git-ignored), one per artifact, shared by every team. Artifact `a11` unlocks the puzzle "The Programmer" (answer `dhh`).
 
 **Pointing the Android app at the emulator.** Copy `openverse-native/.env.example` to `openverse-native/.env`. The Android emulator uses `10.0.2.2` to reach the computer. The login screen then shows a development-only **Use local emulator account** button; production builds continue to show Google login only. For a USB phone, run `adb reverse tcp:9099 tcp:9099`, `adb reverse tcp:8080 tcp:8080`, and `adb reverse tcp:5001 tcp:5001`, then set the host to `127.0.0.1`.
 
@@ -142,14 +180,15 @@ npm run test:emulator       # rules, handlers against Firestore/Auth, e2e throug
 - per-role reads, and denial of every client write to roles, teams, scores, tokens and solve state;
 - that answers are unreadable except by admins;
 - that hiders can't broadcast;
-- duplicate and concurrent team claims;
+- one shared QR per artifact: every team claims once, repeats and concurrent same-team scans are rejected, concurrent claims by different teams both succeed, decoys, revoked artifacts and code rotation;
+- telemetry plausibility: first fix, ordinary movement, impossible jumps, stale, future and non-monotonic timestamps, accuracy, campus bounds, backdated-timestamp sequences, and game, role, suspension and elimination transitions;
 - concurrent correct answers from two teams producing exactly one winner;
 - batch idempotency;
 - the telemetry, join and answer rate limits;
 - game end and elimination;
 - the puzzle-mirror trigger.
 
-The native client is checked with `cd openverse-native && npm run typecheck`; an Android production bundle can be verified with `npx expo export --platform android`.
+The native client is checked with `cd openverse-native && npm run typecheck`; its session logic has its own tests with `npm test`, covering scoped storage, sign-out and account-switch cleanup, stopping tracking on game end, pause, elimination and role loss, the background-task gate, and scoped uploads. Verify the Android production bundle with `npm run verify:bundle`.
 
 After changing `functions/src/shared/contract.ts`, run `npm run sync:contract`. A unit test fails if the app's copy drifts.
 
@@ -159,7 +198,7 @@ Already in place: the Android app `com.openverse.seeker` is registered, `google-
 
 1. **Enable billing (Blaze plan)** under Firebase console → Usage and billing. Cloud Functions can't deploy without it.
 2. **Preview the migration:** `npm run migrate -- --project seekerdb-9e679 --production --dry-run`. It is additive only:
-   - creates `game/state` if it's missing;
+   - creates `game/state` if it's missing, or adds an `eventId` to it;
    - backfills `playerId`, `status`, `score` and `eliminationTokens` on users;
    - mirrors puzzles into `puzzlePublic`;
    - syncs `{role, teamId}` claims.
@@ -171,10 +210,10 @@ Already in place: the Android app `com.openverse.seeker` is registered, `google-
    ```
    Print the QR codes from `functions/seed-output/seekerdb-9e679-qr-codes.csv`, then store or delete that CSV securely.
 6. **Place players:** send them team codes (`joinTeam`), or have an admin call `assignUser`. To make someone admin from the CLI, run `npm run grant-admin -- --email you@example.com --project seekerdb-9e679 --production`.
-7. **Set up App Check:**
+7. **Set up App Check before the first functions deploy.** Sensitive callables enforce it by default.
    - Register the Android app with **Play Integrity**; it needs the app's **SHA-256** from `npx eas-cli credentials -p android`.
-   - For dev builds, register a debug token and set `EXPO_PUBLIC_APP_CHECK_DEBUG_TOKEN`.
-   - Then set `ENFORCE_APP_CHECK=true` in `functions/.env.seekerdb-9e679` and redeploy functions.
+   - For dev builds, register a debug token and set `EXPO_PUBLIC_APP_CHECK_DEBUG_TOKEN` (development only).
+   - Optionally set `ENFORCE_APP_CHECK=true` in `functions/.env.seekerdb-9e679` to enforce every callable.
 8. **Build the APK.** For EAS cloud builds, first upload the config file:
    ```bash
    cd openverse-native
@@ -186,6 +225,7 @@ Already in place: the Android app `com.openverse.seeker` is registered, `google-
 
 - **The backend has no runtime secrets.** Join codes exist only as hashes. Puzzle answers live in the admin-only `puzzles` collection, as in the original schema, and are never sent to players.
 - **Functions config** is `.env.<projectId>` (git-ignored), holding `ENFORCE_APP_CHECK`.
+- **QR code exports** in `seed-output/` are git-ignored. Don't share them outside the organisers.
 - **CLI scripts** derive a short-lived Application Default Credentials file from `firebase login`. It's created with owner-only permissions in the OS temp folder and deleted when the script exits. Never commit service-account keys; `.gitignore` blocks common names.
 - **App `EXPO_PUBLIC_*` variables** are inlined into the bundle and hold no secrets.
 
@@ -194,8 +234,9 @@ Already in place: the Android app `com.openverse.seeker` is registered, `google-
 - **`seekers/{uid}`** is a single, overwritten "latest position" document. `stopTracking`, elimination, a role/team change or game end sets `active: false`, which hides it from surveillance.
 - **Route history** batches expire through a Firestore **TTL policy** after `game.locationRetentionDays` (default **30**). Players can erase their history at any time from the Tracking screen (`deleteLocationHistory`).
 - **`rateLimits`** documents expire through TTL.
-- **On the device**, samples wait in an upload queue (up to 5,000) and are removed only after the server confirms them (`STORED`/`DUPLICATE`). Samples older than 7 days are dropped, because the server would reject them. Sign-out clears the queue.
-- **Tracking only runs** after the player enables it and grants "Allow all the time". Android shows a persistent notification while it runs. It stops on *Stop*, sign-out, elimination, leaving the seeker side, or `game.status == ended`.
+- **On the device**, game progress and queued samples are namespaced by Firebase UID and `game/state.eventId`. The scope comes from the signed-in Firebase user, never from a caller-supplied value. Samples are removed only after the server confirms them. Uploads run only while the signed-in account owns the scope and is authorized to track.
+- **Sign-out or an account change** stops the background task, hides the live position (if still signed in as the owner), and deletes the previous account's queue and progress. Old installation-global keys, whose owner cannot be proven, are deleted rather than migrated.
+- **Tracking only runs** while the signed-in user is an active seeker on a team in an **active** game. It stops on *Stop*, sign-out, account change, pause, game end, elimination, suspension, removal from the team or role loss. The background task records only into a persisted active scope owned by the signed-in user, and re-checks profile and game state about once a minute. Queued samples from a stopped session stay in their own scope and are not uploaded unless that account is authorized again.
 
 ## Indexes and expected write volume
 

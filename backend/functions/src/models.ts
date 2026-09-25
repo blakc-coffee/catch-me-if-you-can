@@ -90,6 +90,13 @@ export interface ArtifactDoc {
   createdAt: Timestamp;
   /** Optional; defaults to ARTIFACT_DEFAULT_POINTS. */
   points?: number;
+  /**
+   * Stable identity for one-claim-per-team deduplication, kept when the QR code
+   * is rotated (see rotateArtifactCode). Missing means the doc id.
+   */
+  claimKey?: string;
+  /** Set on a rotated-out artifact doc: the doc id of its replacement. */
+  replacedBy?: string;
 }
 
 /** puzzles/{puzzleId} — existing, admin-only. `answer` may hold pipe-separated alternatives. */
@@ -130,6 +137,8 @@ export interface SolvedBy {
 /** game/state — single game configuration. */
 export interface GameDoc {
   status: GameStatus;
+  /** Scopes on-device state; clients treat a missing value as DEFAULT_EVENT_ID. */
+  eventId?: string;
   telemetryMinIntervalSec: number;
   broadcastCooldownSec: number;
   staleAfterSec: number;
@@ -159,6 +168,8 @@ export interface SeekerDoc {
   signal: Signal | null;
   trackingEnabled: boolean;
   clientTs: number | null;
+  /** Server epoch ms when the current live fix was accepted (baseline for plausibility checks). */
+  fixServerMs?: number | null;
   lastPing: Timestamp | null;
   updatedAt: Timestamp;
 }

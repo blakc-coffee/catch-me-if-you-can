@@ -2,13 +2,29 @@ import { FUNCTIONS_REGION, type Role } from "./shared/contract.js";
 
 export const REGION = FUNCTIONS_REGION;
 
+export interface AppCheckPolicy {
+  /** Callables that accept location, artifact codes or puzzle answers. */
+  sensitive: boolean;
+  /** Every other callable. */
+  standard: boolean;
+}
+
 /**
- * App Check enforcement is opt-in per environment so the emulator and early
- * development builds keep working. Set ENFORCE_APP_CHECK=true in
- * functions/.env.<projectId> once the Android app ships with the Play Integrity
- * provider (see README "App Check").
+ * App Check policy (see README "App Check"). Sensitive callables require a
+ * valid App Check token in every deployed environment by default; the
+ * Functions emulator never enforces, so local development and tests work
+ * without attestation. ENFORCE_APP_CHECK in functions/.env.<projectId>:
+ *   unset  → sensitive callables enforced, others not
+ *   "true" → every callable enforced
+ *   "false" → nothing enforced (temporary rollout escape hatch; logged at startup)
  */
-export const ENFORCE_APP_CHECK = process.env.ENFORCE_APP_CHECK === "true";
+export function resolveAppCheckPolicy(env: Record<string, string | undefined>): AppCheckPolicy {
+  if (env.FUNCTIONS_EMULATOR === "true" || env.ENFORCE_APP_CHECK === "false") return { sensitive: false, standard: false };
+  const all = env.ENFORCE_APP_CHECK === "true";
+  return { sensitive: true, standard: all };
+}
+
+export const APP_CHECK = resolveAppCheckPolicy(process.env);
 
 /** Role given to brand-new profiles. Every other role is assigned by an ADMIN. */
 export const DEFAULT_ROLE: Role = "seeker";
@@ -44,6 +60,26 @@ export const LIMITS = {
   maxBroadcastPositions: 200,
 } as const;
 
+/**
+ * Live-telemetry plausibility limits (updateTelemetry). They reject fixes a
+ * phone walking or running on campus cannot produce; they cannot prove a fix
+ * came from real GPS hardware (see README "Location trust").
+ */
+export const TELEMETRY_LIMITS = {
+  /** Reported horizontal accuracy worse than this is not used as a live position. */
+  maxAccuracyM: 50,
+  /** A live fix older than this (server time) is stale; queued history goes through uploadLocationBatch. */
+  maxFixAgeMs: 60_000,
+  /** Tolerated device clock drift into the future. */
+  maxFutureSkewMs: 30_000,
+  /** Fastest plausible movement between fixes (fast running is ~7 m/s). */
+  maxSpeedMps: 10,
+  /** Jitter allowance: the smaller of both fixes' combined accuracy and this cap. */
+  maxJitterM: 40,
+  /** Extra time allowed on top of the server-observed interval between fixes. */
+  timingGraceMs: 5_000,
+} as const;
+
 /** Fixed-window rate limits, keyed per user (and per resource where noted). */
 export const RATE_LIMITS = {
   profileSync: { limit: 20, windowMs: 60_000 },
@@ -55,4 +91,5 @@ export const RATE_LIMITS = {
   puzzleAnswerPerPuzzle: { limit: 10, windowMs: 60_000 },
   puzzleAnswerGlobal: { limit: 60, windowMs: 60_000 },
   adminAction: { limit: 60, windowMs: 60_000 },
+  missionState: { limit: 60, windowMs: 60_000 },
 } as const;

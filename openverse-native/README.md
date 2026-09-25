@@ -1,11 +1,14 @@
 # Openverse Native
 
-The native seeker client is built with Expo SDK 57 and React Native 0.86. It authenticates with Firebase, sends game actions through callable Cloud Functions, and queues location samples on-device while offline for later upload.
+The native seeker client is built with Expo SDK 57 and React Native 0.86. It authenticates with the Firebase backend in `../backend`, sends game actions through callable Cloud Functions protected by App Check, and queues location samples on-device while offline for later upload.
 
 ## Included
 
-- Native QR scanning through `expo-camera`
-- Foreground and background GPS through `expo-location` and `expo-task-manager`
+- Google sign-in (plus a development-only emulator account button) and a sign-out action on the location screen
+- Native QR scanning through `expo-camera`; claims are validated by the `claimArtifact` callable
+- Server-backed mission screen (`getMissionState`): team, artifacts claimed / total, score, tokens and case files — nothing is shown until the server answers
+- Case files for every puzzle the team unlocked, reopenable at any time; puzzle text comes only from the server
+- Foreground and background GPS through `expo-location` and `expo-task-manager`, with an offline queue that syncs to Firebase
 - Persistent Android foreground-service notification while a mission is tracked
 - Offline mission state and a bounded location upload queue in AsyncStorage
 - Mission, scanner, case-file, and location-control screens
@@ -16,10 +19,12 @@ The native seeker client is built with Expo SDK 57 and React Native 0.86. It aut
 ```bash
 npm install
 npm run typecheck
+npm test                 # session, storage, mission and case logic
+npm run verify:bundle    # production Android export + scan for puzzle answers/clues
 npm start
 ```
 
-Use a development build or release APK for background location. Expo Go cannot run Android background location services.
+Use a development build or release APK for background location. Expo Go cannot run Android background location services. See `../backend/README.md` for running against the Firebase emulators.
 
 ## Local Firebase integration
 
@@ -70,18 +75,21 @@ npm run build:apk
 
 The `preview` profile in `eas.json` produces an installable APK. The `production` profile produces an AAB for Google Play.
 
-## Privacy behavior
+## Privacy and security behavior
 
 Scanned payloads and game actions are validated by the backend. Live telemetry and queued route-history batches are sent to Firestore through authenticated callable functions. The tracking screen lets the player stop collection and delete both local and server-side route history. Server history expires through the configured Firestore TTL policy.
 
+- No puzzle answers or answer clues are bundled; `npm test` and `npm run verify:bundle` fail if one reappears.
+- Progress and queued location samples are stored per Firebase account and game event. Sign-out or an account change stops tracking and deletes the previous account's local data.
+- Tracking runs only while the signed-in user is an active seeker on a team in a live game, and stops automatically on pause, game end, elimination, suspension or role/team loss.
+- The location screen lets the player stop collection, delete saved route history (on the phone and in Firebase), and sign out.
+
 ## Verification status
 
-- React Native TypeScript check: passed.
-- Expo Android production bundle: passed.
-- Backend build and TypeScript check: passed.
-- Backend unit tests: 44 passed.
-- Firebase emulator and end-to-end tests: 66 passed.
+- React Native TypeScript and session tests must pass.
+- The Expo Android production bundle and answer/clue scan must pass.
+- Backend TypeScript, unit, Firebase emulator, and end-to-end tests must pass.
 
-Camera behavior, Google OAuth, and real background GPS still require an Android device or Android emulator.
+Camera behavior, Google OAuth, Android permissions, notifications, and real background GPS require an Android device or Android emulator on the exact integration commit.
 
 Never commit `.env`, `google-services.json`, service-account keys, production puzzle answers, join codes, or generated QR-code exports.

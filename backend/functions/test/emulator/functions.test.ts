@@ -5,16 +5,18 @@ import { assignUser } from "../../src/auth/assignUser.js";
 import { createOrSyncProfile } from "../../src/auth/profile.js";
 import { createBroadcast } from "../../src/broadcasts/createBroadcast.js";
 import { eliminatePlayer, setGameStatus } from "../../src/game/admin.js";
+import { getMissionState } from "../../src/game/missionState.js";
 import { auth, db } from "../../src/lib/firebase.js";
 import { mirrorPuzzle } from "../../src/puzzles/mirror.js";
 import { submitPuzzleAnswer } from "../../src/puzzles/submitPuzzleAnswer.js";
 import { joinTeam } from "../../src/teams/joinTeam.js";
 import { deleteLocationHistory, uploadLocationBatch } from "../../src/telemetry/locationBatches.js";
 import { stopTracking, updateTelemetry } from "../../src/telemetry/updateTelemetry.js";
-import { seedGame, type SeededArtifact } from "../../scripts/seedGame.js";
+import { rotateArtifactCode, seedGame, type SeededArtifact } from "../../scripts/seedGame.js";
 import { CODES, docData, expectReason, makeUser, onCampus, resetEmulators, seed, seedData } from "./helpers.js";
 
 let qr: Map<string, SeededArtifact>;
+/** The artifact's single QR code, shared by every team. */
 const code = (key: string) => qr.get(key)!.qrCode;
 const fix = (extra: Record<string, unknown> = {}) => ({ ...onCampus, accuracyM: 6, battery: 80, signal: "GOOD", clientTs: Date.now(), ...extra });
 const seeker = (team = "alpha", name?: string) => makeUser("seeker", team, name);
@@ -128,12 +130,69 @@ describe("profiles, roles and teams", () => {
 });
 
 describe("updateTelemetry", () => {
-  it("writes the latest position with server-derived zone and server timestamp", async () => {
+  /** Stores an accepted live fix `secondsAgo` in the past, as updateTelemetry would have. */
+  async function priorFix(uid: string, secondsAgo: number, at: { lat: number; lon: number } = onCampus, clientSecondsAgo = secondsAgo) {
+    const ms = Date.now() - secondsAgo * 1000;
+    await db().doc(`seekers/${uid}`).set({
+      uid, teamId: "alpha", playerId: "OP-TEST", name: "Prior", active: true, trackingEnabled: true, status: "active",
+      lat: at.lat, lon: at.lon, accuracyM: 6, clientTs: Date.now() - clientSecondsAgo * 1000, fixServerMs: ms,
+      lastPing: Timestamp.fromMillis(ms), updatedAt: Timestamp.fromMillis(ms),
+    });
+  }
+  const sports = { lat: 9.754, lon: 76.649392 };
+  const dining = { lat: 9.755678, lon: 76.650101 };
+  /** `meters` north of onCampus. */
+  const north = (meters: number) => ({ lat: onCampus.lat + meters / 111_195, lon: onCampus.lon });
+
+  it("accepts the first fix and writes the latest position with server-derived zone and server timestamp", async () => {
     const s = await seeker("alpha", "Echo");
     await expect(updateTelemetry(s, fix({ speedMps: 2 }))).resolves.toMatchObject({ zoneId: "academic_1", inBounds: true });
     const doc = await docData<Record<string, unknown>>(`seekers/${s.uid}`);
     expect(doc).toMatchObject({ active: true, teamId: "alpha", name: "Echo", zoneId: "academic_1", status: "in_transit", speedKmh: 7.2 });
     expect(doc!.lastPing).toBeInstanceOf(Timestamp);
+    expect(Math.abs((doc!.fixServerMs as number) - Date.now())).toBeLessThan(10_000);
+  });
+
+  it("accepts ordinary movement from the previous accepted fix", async () => {
+    const s = await seeker();
+    await priorFix(s.uid, 30);
+    await expect(updateTelemetry(s, fix(north(150)))).resolves.toMatchObject({ inBounds: true });
+    expect(await docData(`seekers/${s.uid}`)).toMatchObject({ lat: north(150).lat });
+  });
+
+  it("rejects an impossible jump and keeps the previous position", async () => {
+    const s = await seeker();
+    await priorFix(s.uid, 10, sports);
+    await expectReason(updateTelemetry(s, fix(dining)), "TELEMETRY_IMPLAUSIBLE_MOVEMENT");
+    expect(await docData(`seekers/${s.uid}`)).toMatchObject({ lat: sports.lat, lon: sports.lon });
+  });
+
+  it("rejects a jump hidden behind a backdated previous fix and a future-dated new fix", async () => {
+    const s = await seeker();
+    // Previous fix claimed to be 55 s old but reached the server 10 s ago; the new
+    // one claims to be 25 s in the future. ~200 m would pass over a claimed 80 s.
+    await priorFix(s.uid, 10, sports, 55);
+    await expectReason(updateTelemetry(s, fix({ ...dining, clientTs: Date.now() + 25_000 })), "TELEMETRY_IMPLAUSIBLE_MOVEMENT");
+  });
+
+  it("rejects stale, future and non-monotonic timestamps", async () => {
+    const s = await seeker();
+    await expectReason(updateTelemetry(s, fix({ clientTs: Date.now() - 5 * 60_000 })), "TELEMETRY_STALE_FIX");
+    await expectReason(updateTelemetry(s, fix({ clientTs: Date.now() + 5 * 60_000 })), "TELEMETRY_FUTURE_FIX");
+    await priorFix(s.uid, 5);
+    const prev = (await docData<{ clientTs: number }>(`seekers/${s.uid}`))!.clientTs;
+    await expectReason(updateTelemetry(s, fix({ clientTs: prev })), "TELEMETRY_NON_MONOTONIC");
+    const s2 = await seeker();
+    await priorFix(s2.uid, 5);
+    await expectReason(updateTelemetry(s2, fix({ clientTs: Date.now() - 20_000 })), "TELEMETRY_NON_MONOTONIC");
+  });
+
+  it("rejects unacceptable accuracy and out-of-campus coordinates without writing", async () => {
+    const s = await seeker();
+    await expectReason(updateTelemetry(s, fix({ accuracyM: 120 })), "TELEMETRY_LOW_ACCURACY");
+    await expectReason(updateTelemetry(s, fix({ lat: 9.76, lon: 76.65 })), "TELEMETRY_OUT_OF_BOUNDS");
+    await expectReason(updateTelemetry(s, fix({ lat: 0, lon: 0 })), "TELEMETRY_OUT_OF_BOUNDS");
+    expect(await docData(`seekers/${s.uid}`)).toBeUndefined();
   });
 
   it("enforces role, team and throttle", async () => {
@@ -154,13 +213,33 @@ describe("updateTelemetry", () => {
     expect(await docData(`seekers/${s.uid}`)).toMatchObject({ active: false, status: "eliminated" });
   });
 
-  it("stopTracking hides the seeker until the next accepted update", async () => {
+  it("refuses after role loss, suspension, pause and game end", async () => {
+    const admin = await makeUser("admin");
+    const moved = await seeker();
+    await assignUser(admin, { uid: moved.uid, role: "hider", teamId: "ghost" });
+    await expectReason(updateTelemetry(moved, fix()), "ROLE_NOT_ALLOWED");
+
+    const suspended = await seeker();
+    await db().doc(`users/${suspended.uid}`).update({ status: "suspended" });
+    await expectReason(updateTelemetry(suspended, fix()), "ACCOUNT_SUSPENDED");
+
+    const s = await seeker();
+    await setGameStatus(admin, { status: "paused" });
+    await expectReason(updateTelemetry(s, fix()), "GAME_NOT_ACTIVE");
+    await setGameStatus(admin, { status: "ended" });
+    await expectReason(updateTelemetry(s, fix()), "GAME_ENDED");
+    expect(await docData(`seekers/${s.uid}`)).toBeUndefined();
+  });
+
+  it("stopTracking hides the seeker until the next accepted update, keeping the movement baseline", async () => {
     await resetEmulators();
     qr = await seed({ telemetryMinIntervalSec: 1 });
     const s = await seeker();
     await updateTelemetry(s, fix());
     await expect(stopTracking(s, {})).resolves.toEqual({ trackingEnabled: false });
     expect(await docData(`seekers/${s.uid}`)).toMatchObject({ active: false, trackingEnabled: false, status: "offline" });
+    await new Promise((r) => setTimeout(r, 1_100));
+    await expectReason(updateTelemetry(s, fix(dining)), "TELEMETRY_IMPLAUSIBLE_MOVEMENT");
     await new Promise((r) => setTimeout(r, 1_100));
     await updateTelemetry(s, fix());
     expect(await docData(`seekers/${s.uid}`)).toMatchObject({ active: true });
@@ -209,54 +288,100 @@ describe("uploadLocationBatch", () => {
   });
 });
 
-describe("claimArtifact", () => {
+describe("claimArtifact (one shared QR code per artifact)", () => {
   it("rejects malformed and unknown codes identically", async () => {
     const s = await seeker();
     await expectReason(claimArtifact(s, { payload: "https://evil.example/qr" }), "INVALID_ARTIFACT_CODE");
     await expectReason(claimArtifact(s, { payload: "OV-does-not-exist" }), "INVALID_ARTIFACT_CODE");
     await expectReason(claimArtifact(s, { payload: ".." }), "INVALID_ARTIFACT_CODE");
+    expect((await db().collection("artifactClaims").get()).size).toBe(0);
   });
 
-  it("claims once per team, atomically updating claim, unlock, team and player", async () => {
-    const s = await seeker("alpha");
-    const r = await claimArtifact(s, { payload: code("a11") });
-    expect(r).toMatchObject({ status: "CLAIMED", name: "Artifact 11", points: 25, teamArtifactsClaimed: 1, totalArtifacts: 15, puzzle: { puzzleId: "case-01", title: "The Programmer" } });
+  it("lets every team claim the same QR once, keeping claims, unlocks and points team-scoped", async () => {
+    const [alpha, bravo] = [await seeker("alpha"), await seeker("bravo")];
+    // 1. alpha claims.
+    await expect(claimArtifact(alpha, { payload: code("a11") })).resolves.toMatchObject({
+      status: "CLAIMED", points: 25, teamArtifactsClaimed: 1, totalArtifacts: 15, puzzle: { puzzleId: "case-01", title: "The Programmer" },
+    });
+    // 2. bravo claims the very same code.
+    await expect(claimArtifact(bravo, { payload: code("a11") })).resolves.toMatchObject({ status: "CLAIMED", teamArtifactsClaimed: 1, puzzle: { puzzleId: "case-01" } });
+    // 3–4. repeats by either team are rejected without changing anything.
+    const again = await expectReason(claimArtifact(alpha, { payload: code("a11") }), "ARTIFACT_ALREADY_CLAIMED");
+    expect(again.details).toMatchObject({ artifactId: code("a11"), puzzleId: "case-01" });
+    await expectReason(claimArtifact(bravo, { payload: ` ${code("a11")}\n` }), "ARTIFACT_ALREADY_CLAIMED");
+    // 10. each team got exactly one claim, one unlock and the points once.
     expect(await docData("teams/alpha")).toMatchObject({ artifactsClaimed: 1, score: 25 });
-    expect(await docData(`users/${s.uid}`)).toMatchObject({ score: 25 });
+    expect(await docData("teams/bravo")).toMatchObject({ artifactsClaimed: 1, score: 25 });
+    expect(await docData(`users/${alpha.uid}`)).toMatchObject({ score: 25 });
+    expect(await docData(`users/${bravo.uid}`)).toMatchObject({ score: 25 });
     expect(await docData("puzzleUnlocks/alpha_case-01")).toMatchObject({ teamId: "alpha", artifactId: code("a11") });
+    expect(await docData("puzzleUnlocks/bravo_case-01")).toMatchObject({ teamId: "bravo", artifactId: code("a11") });
+    expect((await db().collection("artifactClaims").where("artifactId", "==", code("a11")).get()).size).toBe(2);
   });
 
-  it("fails duplicate claims — also from a teammate — without changing progress", async () => {
+  it("rejects a teammate's repeat of the team's claim", async () => {
     const [a, b] = [await seeker("alpha"), await seeker("alpha")];
     await claimArtifact(a, { payload: code("a01") });
-    const err = await expectReason(claimArtifact(b, { payload: ` ${code("a01")}\n` }), "ARTIFACT_ALREADY_CLAIMED");
-    expect(err.details).toMatchObject({ artifactId: code("a01") });
+    await expectReason(claimArtifact(b, { payload: code("a01") }), "ARTIFACT_ALREADY_CLAIMED");
     expect(await docData("teams/alpha")).toMatchObject({ artifactsClaimed: 1, score: 25 });
-    // Another team can still claim it.
-    await expect(claimArtifact(await seeker("bravo"), { payload: code("a01") })).resolves.toMatchObject({ status: "CLAIMED", teamArtifactsClaimed: 1 });
+    expect(await docData(`users/${b.uid}`)).toMatchObject({ score: 0 });
   });
 
-  it("is idempotent under concurrent scans by the whole team", async () => {
+  it("5. concurrent claims by one team produce exactly one success", async () => {
     const team = await Promise.all([seeker(), seeker(), seeker()]);
     const results = await Promise.allSettled(team.flatMap((s) => [claimArtifact(s, { payload: code("a02") }), claimArtifact(s, { payload: code("a02") })]));
     expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
     expect(await docData("teams/alpha")).toMatchObject({ artifactsClaimed: 1, score: 25 });
   });
 
-  it("returns DECOY with the redirect for wrong codes and awards nothing", async () => {
-    const s = await seeker();
-    await expect(claimArtifact(s, { payload: code("d01") })).resolves.toMatchObject({ status: "DECOY", name: "Decoy Key", redirectUrl: "https://example.com/wrong" });
-    expect((await docData("teams/alpha"))?.score ?? 0).toBe(0);
+  it("6. concurrent claims by different teams both succeed", async () => {
+    const players = await Promise.all([seeker("alpha"), seeker("alpha"), seeker("bravo"), seeker("bravo")]);
+    const results = await Promise.allSettled(players.map((s) => claimArtifact(s, { payload: code("a03") })));
+    const wins = results.flatMap((r, i) => (r.status === "fulfilled" ? [i < 2 ? "alpha" : "bravo"] : []));
+    expect(wins.sort()).toEqual(["alpha", "bravo"]);
+    expect(await docData("teams/alpha")).toMatchObject({ artifactsClaimed: 1, score: 25 });
+    expect(await docData("teams/bravo")).toMatchObject({ artifactsClaimed: 1, score: 25 });
   });
 
-  it("refuses hiders, team-less seekers, eliminated players, inactive codes and ended games", async () => {
-    await expectReason(claimArtifact(await hider(), { payload: code("a03") }), "ROLE_NOT_ALLOWED");
-    await expectReason(claimArtifact(await makeUser("seeker"), { payload: code("a03") }), "NO_TEAM");
+  it("7. decoys return DECOY with the redirect for every team and award nothing", async () => {
+    for (const team of ["alpha", "bravo"]) {
+      await expect(claimArtifact(await seeker(team), { payload: code("d01") })).resolves.toMatchObject({ status: "DECOY", name: "Decoy Key", redirectUrl: "https://example.com/wrong" });
+      expect((await docData(`teams/${team}`))?.score ?? 0).toBe(0);
+    }
+    expect((await db().collection("artifactClaims").get()).size).toBe(0);
+  });
+
+  it("8. a rotated code replaces the old one for everyone without allowing a second claim", async () => {
+    const alpha = await seeker("alpha");
+    await claimArtifact(alpha, { payload: code("a06") });
+    const { newCode } = await rotateArtifactCode(db(), code("a06"));
+    // The old code is dead for every team.
+    await expectReason(claimArtifact(await seeker("bravo"), { payload: code("a06") }), "INVALID_ARTIFACT_CODE");
+    // alpha already has this artifact: the new code does not pay out twice.
+    await expectReason(claimArtifact(alpha, { payload: newCode }), "ARTIFACT_ALREADY_CLAIMED");
+    // bravo claims it with the new code.
+    await expect(claimArtifact(await seeker("bravo"), { payload: newCode })).resolves.toMatchObject({ status: "CLAIMED" });
+    expect(await docData("teams/alpha")).toMatchObject({ artifactsClaimed: 1, score: 25 });
+    expect(await docData("teams/bravo")).toMatchObject({ artifactsClaimed: 1, score: 25 });
+    // The total still counts the artifact once, and a re-seed keeps the new code.
+    const reseeded = await seed();
+    expect(reseeded.get("a06")!.qrCode).toBe(newCode);
+    await expect(claimArtifact(await seeker("bravo"), { payload: code("a08") })).resolves.toMatchObject({ totalArtifacts: 15 });
+  });
+
+  it("9. inactive (revoked) artifacts are rejected for every team", async () => {
+    await db().doc(`artifacts/${code("a04")}`).update({ isActive: false });
+    await expectReason(claimArtifact(await seeker("alpha"), { payload: code("a04") }), "INVALID_ARTIFACT_CODE");
+    await expectReason(claimArtifact(await seeker("bravo"), { payload: code("a04") }), "INVALID_ARTIFACT_CODE");
+    await expect(rotateArtifactCode(db(), code("a04"))).rejects.toThrow(/inactive/);
+  });
+
+  it("refuses hiders, team-less seekers, eliminated players and ended games", async () => {
+    await expectReason(claimArtifact(await hider(), { payload: code("a05") }), "ROLE_NOT_ALLOWED");
+    await expectReason(claimArtifact(await makeUser("seeker"), { payload: code("a05") }), "NO_TEAM");
     const s = await seeker();
     await eliminatePlayer(await makeUser("surveillance"), { uid: s.uid });
-    await expectReason(claimArtifact(s, { payload: code("a03") }), "PLAYER_ELIMINATED");
-    await db().doc(`artifacts/${code("a04")}`).update({ isActive: false });
-    await expectReason(claimArtifact(await seeker(), { payload: code("a04") }), "INVALID_ARTIFACT_CODE");
+    await expectReason(claimArtifact(s, { payload: code("a05") }), "PLAYER_ELIMINATED");
     const s2 = await seeker();
     await setGameStatus(await makeUser("admin"), { status: "ended" });
     await expectReason(claimArtifact(s2, { payload: code("a05") }), "GAME_ENDED");
@@ -313,6 +438,47 @@ describe("submitPuzzleAnswer", () => {
     const h = await hider();
     for (let i = 0; i < 10; i++) await expect(submitPuzzleAnswer(h, { puzzleId: "ch-02", answer: `guess ${i}` })).resolves.toMatchObject({ status: "INCORRECT" });
     await expectReason(submitPuzzleAnswer(h, { puzzleId: "ch-02", answer: "22" }), "RATE_LIMITED");
+  });
+});
+
+describe("getMissionState", () => {
+  it("reports real, zeroed progress for a new seeker", async () => {
+    const r = await getMissionState(await seeker("alpha"), {});
+    expect(r).toMatchObject({ gameStatus: "active", totalArtifacts: 15, puzzles: [], team: { teamId: "alpha", name: "Team Alpha", score: 0, tokens: 0, artifactsClaimed: 0, puzzlesSolved: 0 } });
+    expect(r.eventId).toBe((await docData<{ eventId: string }>("game/state"))!.eventId);
+  });
+
+  it("lists every puzzle the team unlocked, oldest first, without answers, and tracks solves", async () => {
+    const [a, mate] = [await seeker("alpha"), await seeker("alpha")];
+    await claimArtifact(a, { payload: code("a11") });
+    const first = await getMissionState(mate, {});
+    expect(first.team).toMatchObject({ artifactsClaimed: 1, score: 25 });
+    expect(first.puzzles).toEqual([
+      { puzzleId: "case-01", title: "The Programmer", question: expect.any(String), unlockedAtMs: expect.any(Number), solved: false, solvedByYourTeam: false },
+    ]);
+    expect(JSON.stringify(first)).not.toMatch(/dhh|answer/i);
+    await submitPuzzleAnswer(a, { puzzleId: "case-01", answer: "dhh" });
+    const after = await getMissionState(mate, {});
+    expect(after.puzzles[0]).toMatchObject({ solved: true, solvedByYourTeam: true });
+    expect(after.team).toMatchObject({ puzzlesSolved: 1, tokens: 1 });
+    // Another team neither sees alpha's unlock nor alpha's progress.
+    expect(await getMissionState(await seeker("bravo"), {})).toMatchObject({ puzzles: [], team: { teamId: "bravo", artifactsClaimed: 0 } });
+  });
+
+  it("shows hiders the puzzles addressed to them", async () => {
+    const r = await getMissionState(await hider("ghost"), {});
+    expect(r.puzzles.map((p) => p.puzzleId)).toEqual(["ch-01", "ch-02", "ch-03"]);
+    expect(r.team).toMatchObject({ teamId: "ghost", type: "hider" });
+  });
+
+  it("is role-aware: no team, staff and unknown input are refused; eliminated players can still read", async () => {
+    await expectReason(getMissionState(await makeUser("seeker"), {}), "NO_TEAM");
+    await expectReason(getMissionState(await makeUser("surveillance"), {}), "ROLE_NOT_ALLOWED");
+    await expectReason(getMissionState(await makeUser("admin"), {}), "ROLE_NOT_ALLOWED");
+    await expectReason(getMissionState(await seeker(), { teamId: "bravo" }), "INVALID_ARGUMENT");
+    const s = await seeker();
+    await eliminatePlayer(await makeUser("admin"), { uid: s.uid });
+    await expect(getMissionState(s, {})).resolves.toMatchObject({ team: { teamId: "alpha" } });
   });
 });
 

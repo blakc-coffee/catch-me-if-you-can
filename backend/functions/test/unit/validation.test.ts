@@ -60,12 +60,18 @@ describe("input validation", () => {
     expect(JSON.stringify(r.issues)).not.toContain("1234.5678");
   });
 
-  it("rejects telemetry whose device time is far from server time", async () => {
-    await expect(reason(updateTelemetry(ctx, { ...goodFix, clientTs: now - 60 * 60_000 }))).resolves.toMatchObject({
-      reason: "TELEMETRY_CLOCK_SKEW",
+  it("rejects stale, future, inaccurate and off-campus live fixes before any Firestore access", async () => {
+    await expect(reason(updateTelemetry(ctx, { ...goodFix, clientTs: Date.now() - 2 * 60_000 }))).resolves.toMatchObject({
+      reason: "TELEMETRY_STALE_FIX",
     });
-    await expect(reason(updateTelemetry(ctx, { ...goodFix, clientTs: now + 60 * 60_000 }))).resolves.toMatchObject({
-      reason: "TELEMETRY_CLOCK_SKEW",
+    await expect(reason(updateTelemetry(ctx, { ...goodFix, clientTs: Date.now() + 60 * 60_000 }))).resolves.toMatchObject({
+      reason: "TELEMETRY_FUTURE_FIX",
+    });
+    await expect(reason(updateTelemetry(ctx, { ...goodFix, clientTs: Date.now(), accuracyM: 51 }))).resolves.toMatchObject({
+      reason: "TELEMETRY_LOW_ACCURACY",
+    });
+    await expect(reason(updateTelemetry(ctx, { ...goodFix, clientTs: Date.now(), lat: 10.0 }))).resolves.toMatchObject({
+      reason: "TELEMETRY_OUT_OF_BOUNDS",
     });
   });
 

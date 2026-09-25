@@ -29,10 +29,11 @@ export async function countRealArtifacts(): Promise<number> {
 
 /**
  * Validates a scanned QR payload server-side against artifacts/{qrCode} and
- * claims it for the caller's team. Decoys (qrType "wrong") return DECOY with
- * the organiser's redirectUrl and award nothing. A deterministic per-team claim
- * id plus a transactional create() makes duplicate claims fail with
- * ARTIFACT_ALREADY_CLAIMED; the claim, puzzle unlock, team counters and the
+ * claims it for the caller's team. Each artifact has one shared QR code:
+ * every eligible team may claim it once, and teams do not affect each other.
+ * Decoys (qrType "wrong") return DECOY with the organiser's redirectUrl and
+ * award nothing. A deterministic per-team claim id plus a transactional
+ * create() makes duplicate claims fail with ARTIFACT_ALREADY_CLAIMED; the claim, puzzle unlock, team counters and the
  * player's score commit atomically.
  */
 export async function claimArtifact(ctx: CallContext, raw: unknown): Promise<ClaimArtifactResponse> {
@@ -58,7 +59,8 @@ export async function claimArtifact(ctx: CallContext, raw: unknown): Promise<Cla
     if (artifact.qrType !== "correct") invalidCode();
 
     const team = await loadTeam(d, tx, user.teamId);
-    const claimRef = d.collection(COL.artifactClaims).doc(docIds.artifactClaim(user.teamId, artifactKey(artifactSnap.id)));
+    // claimKey survives QR rotation, so a rotated code cannot be claimed twice by one team.
+    const claimRef = d.collection(COL.artifactClaims).doc(docIds.artifactClaim(user.teamId, artifactKey(artifact.claimKey ?? artifactSnap.id)));
     const puzzleId = artifact.puzzleId ?? null;
     const unlockRef = puzzleId ? d.collection(COL.puzzleUnlocks).doc(docIds.puzzleUnlock(user.teamId, puzzleId)) : null;
     const [claimSnap, unlockSnap, puzzleSnap] = await Promise.all([
