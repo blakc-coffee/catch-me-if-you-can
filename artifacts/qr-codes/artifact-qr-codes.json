@@ -1,0 +1,138 @@
+[
+  {
+    "key": "a01",
+    "name": "Artifact 01",
+    "qrType": "correct",
+    "puzzleId": null,
+    "areaId": "academic-1",
+    "qrCode": "OV-seed-a01-2142"
+  },
+  {
+    "key": "a02",
+    "name": "Artifact 02",
+    "qrType": "correct",
+    "puzzleId": null,
+    "areaId": "academic-1",
+    "qrCode": "OV-seed-a02-2143"
+  },
+  {
+    "key": "a03",
+    "name": "Artifact 03",
+    "qrType": "correct",
+    "puzzleId": null,
+    "areaId": "academic-2",
+    "qrCode": "OV-seed-a03-2144"
+  },
+  {
+    "key": "a04",
+    "name": "Artifact 04",
+    "qrType": "correct",
+    "puzzleId": null,
+    "areaId": "academic-2",
+    "qrCode": "OV-seed-a04-2145"
+  },
+  {
+    "key": "a05",
+    "name": "Artifact 05",
+    "qrType": "correct",
+    "puzzleId": null,
+    "areaId": "admin",
+    "qrCode": "OV-seed-a05-2146"
+  },
+  {
+    "key": "a06",
+    "name": "Artifact 06",
+    "qrType": "correct",
+    "puzzleId": null,
+    "areaId": "admin",
+    "qrCode": "OV-seed-a06-2147"
+  },
+  {
+    "key": "a07",
+    "name": "Artifact 07",
+    "qrType": "correct",
+    "puzzleId": null,
+    "areaId": "oat",
+    "qrCode": "OV-seed-a07-2148"
+  },
+  {
+    "key": "a08",
+    "name": "Artifact 08",
+    "qrType": "correct",
+    "puzzleId": null,
+    "areaId": "oat",
+    "qrCode": "OV-seed-a08-2149"
+  },
+  {
+    "key": "a09",
+    "name": "Artifact 09",
+    "qrType": "correct",
+    "puzzleId": null,
+    "areaId": "dining",
+    "qrCode": "OV-seed-a09-214a"
+  },
+  {
+    "key": "a10",
+    "name": "Artifact 10",
+    "qrType": "correct",
+    "puzzleId": null,
+    "areaId": "dining",
+    "qrCode": "OV-seed-a10-214w"
+  },
+  {
+    "key": "a11",
+    "name": "Artifact 11",
+    "qrType": "correct",
+    "puzzleId": "case-01",
+    "areaId": "fitness",
+    "qrCode": "OV-seed-a11-214x"
+  },
+  {
+    "key": "a12",
+    "name": "Artifact 12",
+    "qrType": "correct",
+    "puzzleId": null,
+    "areaId": "fitness",
+    "qrCode": "OV-seed-a12-214y"
+  },
+  {
+    "key": "a13",
+    "name": "Artifact 13",
+    "qrType": "correct",
+    "puzzleId": null,
+    "areaId": "sports",
+    "qrCode": "OV-seed-a13-214z"
+  },
+  {
+    "key": "a14",
+    "name": "Artifact 14",
+    "qrType": "correct",
+    "puzzleId": null,
+    "areaId": "sports",
+    "qrCode": "OV-seed-a14-2150"
+  },
+  {
+    "key": "a15",
+    "name": "Artifact 15",
+    "qrType": "correct",
+    "puzzleId": null,
+    "areaId": "sports",
+    "qrCode": "OV-seed-a15-2151"
+  },
+  {
+    "key": "d01",
+    "name": "Decoy Key",
+    "qrType": "wrong",
+    "puzzleId": null,
+    "areaId": "oat",
+    "qrCode": "OV-seed-d01-23c5"
+  },
+  {
+    "key": "d02",
+    "name": "Rusty Key",
+    "qrType": "wrong",
+    "puzzleId": null,
+    "areaId": "dining",
+    "qrCode": "OV-seed-d02-23c6"
+  }
+]

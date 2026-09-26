@@ -31,7 +31,7 @@ function rejectFix(reason: FixRejection): never {
 
 function acceptedFix(seeker: SeekerDoc | undefined): AcceptedFix | null {
   if (!seeker || seeker.lat == null || seeker.lon == null || seeker.clientTs == null) return null;
-  const serverMs = seeker.fixServerMs ?? seeker.lastPing?.toMillis();
+  const serverMs = seeker.fixServerMs ?? (typeof seeker.lastPing === "number" ? seeker.lastPing : seeker.lastPing?.toMillis());
   if (serverMs == null) return null;
   return { lat: seeker.lat, lon: seeker.lon, accuracyM: seeker.accuracyM ?? 0, clientTs: seeker.clientTs, serverMs };
 }

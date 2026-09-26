@@ -29,6 +29,20 @@ import {
   directUpdateTelemetry,
   directUploadLocationBatch,
 } from "./directFirestore";
+import {
+  convexClaimArtifact,
+  convexCreateOrSyncProfile,
+  convexDeleteRemoteLocationHistory,
+  convexGetMissionState,
+  getConvexReason,
+  convexStopRemoteTracking,
+  convexSubmitPuzzleAnswer,
+  convexUpdateTelemetry,
+  convexUploadLocationBatch,
+} from "../convex/api";
+import { convexConfigured } from "../convex/client";
+
+const useConvexBackend = convexConfigured() && !useFirebaseEmulators;
 
 const functions = () => getFunctions(undefined, FUNCTIONS_REGION);
 
@@ -38,15 +52,18 @@ async function call<Req, Res>(name: string, data: Req): Promise<Res> {
 }
 
 export async function createOrSyncProfile(
-  data: CreateOrSyncProfileRequest = {}
+  data: CreateOrSyncProfileRequest = {},
 ): Promise<CreateOrSyncProfileResponse> {
+  if (useConvexBackend) {
+    return convexCreateOrSyncProfile(data);
+  }
   if (!useFirebaseEmulators) {
     return directCreateOrSyncProfile(data);
   }
   try {
     const response = await call<CreateOrSyncProfileRequest, CreateOrSyncProfileResponse>(
       CALLABLES.createOrSyncProfile,
-      data
+      data,
     );
     if (response.claimsUpdated) await getAuth().currentUser?.getIdToken(true);
     return response;
@@ -57,11 +74,20 @@ export async function createOrSyncProfile(
 }
 
 export const claimArtifact = async (payload: string): Promise<ClaimArtifactResponse> => {
+  if (useConvexBackend) {
+    try {
+      return await convexClaimArtifact(payload);
+    } catch {
+      return directClaimArtifact(payload);
+    }
+  }
   if (!useFirebaseEmulators) {
     return directClaimArtifact(payload);
   }
   try {
-    return await call<ClaimArtifactRequest, ClaimArtifactResponse>(CALLABLES.claimArtifact, { payload });
+    return await call<ClaimArtifactRequest, ClaimArtifactResponse>(CALLABLES.claimArtifact, {
+      payload,
+    });
   } catch (err) {
     console.warn("Callable claimArtifact failed, falling back to direct Firestore", err);
     return directClaimArtifact(payload);
@@ -70,18 +96,22 @@ export const claimArtifact = async (payload: string): Promise<ClaimArtifactRespo
 
 export const submitPuzzleAnswer = async (
   puzzleId: string,
-  answer: string
+  answer: string,
 ): Promise<SubmitPuzzleAnswerResponse> => {
+  if (useConvexBackend) {
+    try {
+      return await convexSubmitPuzzleAnswer(puzzleId, answer);
+    } catch {
+      return directSubmitPuzzleAnswer(puzzleId, answer);
+    }
+  }
   if (!useFirebaseEmulators) {
     return directSubmitPuzzleAnswer(puzzleId, answer);
   }
   try {
     return await call<SubmitPuzzleAnswerRequest, SubmitPuzzleAnswerResponse>(
       CALLABLES.submitPuzzleAnswer,
-      {
-        puzzleId,
-        answer,
-      }
+      { puzzleId, answer },
     );
   } catch (err) {
     console.warn("Callable submitPuzzleAnswer failed, falling back to direct Firestore", err);
@@ -90,15 +120,18 @@ export const submitPuzzleAnswer = async (
 };
 
 export const updateTelemetry = async (
-  data: UpdateTelemetryRequest
+  data: UpdateTelemetryRequest,
 ): Promise<UpdateTelemetryResponse> => {
+  if (useConvexBackend) {
+    return convexUpdateTelemetry(data);
+  }
   if (!useFirebaseEmulators) {
     return directUpdateTelemetry(data);
   }
   try {
     return await call<UpdateTelemetryRequest, UpdateTelemetryResponse>(
       CALLABLES.updateTelemetry,
-      data
+      data,
     );
   } catch (err) {
     console.warn("Callable updateTelemetry failed, falling back to direct Firestore", err);
@@ -107,15 +140,18 @@ export const updateTelemetry = async (
 };
 
 export const uploadLocationBatch = async (
-  data: UploadLocationBatchRequest
+  data: UploadLocationBatchRequest,
 ): Promise<UploadLocationBatchResponse> => {
+  if (useConvexBackend) {
+    return convexUploadLocationBatch(data);
+  }
   if (!useFirebaseEmulators) {
     return directUploadLocationBatch(data);
   }
   try {
     return await call<UploadLocationBatchRequest, UploadLocationBatchResponse>(
       CALLABLES.uploadLocationBatch,
-      data
+      data,
     );
   } catch (err) {
     console.warn("Callable uploadLocationBatch failed, falling back to direct Firestore", err);
@@ -124,13 +160,16 @@ export const uploadLocationBatch = async (
 };
 
 export const getMissionState = async (): Promise<GetMissionStateResponse> => {
+  if (useConvexBackend) {
+    return convexGetMissionState();
+  }
   if (!useFirebaseEmulators) {
     return directGetMissionState();
   }
   try {
     return await call<GetMissionStateRequest, GetMissionStateResponse>(
       CALLABLES.getMissionState,
-      {}
+      {},
     );
   } catch (err) {
     console.warn("Callable getMissionState failed, falling back to direct Firestore", err);
@@ -139,6 +178,9 @@ export const getMissionState = async (): Promise<GetMissionStateResponse> => {
 };
 
 export const stopRemoteTracking = async (): Promise<StopTrackingResponse> => {
+  if (useConvexBackend) {
+    return convexStopRemoteTracking();
+  }
   if (!useFirebaseEmulators) {
     return directStopRemoteTracking();
   }
@@ -151,13 +193,16 @@ export const stopRemoteTracking = async (): Promise<StopTrackingResponse> => {
 };
 
 export const deleteRemoteLocationHistory = async (): Promise<DeleteLocationHistoryResponse> => {
+  if (useConvexBackend) {
+    return convexDeleteRemoteLocationHistory();
+  }
   if (!useFirebaseEmulators) {
     return directDeleteRemoteLocationHistory();
   }
   try {
     return await call<Record<string, never>, DeleteLocationHistoryResponse>(
       CALLABLES.deleteLocationHistory,
-      {}
+      {},
     );
   } catch (err) {
     console.warn("Callable deleteRemoteLocationHistory failed, falling back to direct Firestore", err);
@@ -166,6 +211,8 @@ export const deleteRemoteLocationHistory = async (): Promise<DeleteLocationHisto
 };
 
 export function getCallableReason(error: unknown): string | null {
+  const convexReason = getConvexReason(error);
+  if (convexReason) return convexReason;
   if (!error || typeof error !== "object") return null;
   const details = "details" in error ? (error as { details?: unknown }).details : undefined;
   if (!details || typeof details !== "object" || !("reason" in details)) return null;
