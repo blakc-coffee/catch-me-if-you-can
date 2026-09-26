@@ -211,7 +211,7 @@ export const deleteRemoteLocationHistory = async (): Promise<DeleteLocationHisto
 };
 
 export function getCallableReason(error: unknown): string | null {
-  const convexReason = convexGetReason(error);
+  const convexReason = getConvexReason(error);
   if (convexReason) return convexReason;
   if (!error || typeof error !== "object") return null;
   const details = "details" in error ? (error as { details?: unknown }).details : undefined;
