@@ -22,14 +22,18 @@ let configured = false;
  * project from them. Release builds always use Play Integrity.
  */
 function configureAppCheck(): void {
-  const debug = __DEV__ || useFirebaseEmulators;
-  const debugToken = debug ? process.env.EXPO_PUBLIC_APP_CHECK_DEBUG_TOKEN : undefined;
-  const provider = new ReactNativeFirebaseAppCheckProvider();
-  provider.configure({
-    android: { provider: debug ? "debug" : "playIntegrity", ...(debugToken ? { debugToken } : {}) },
-    apple: { provider: debug ? "debug" : "appAttestWithDeviceCheckFallback", ...(debugToken ? { debugToken } : {}) },
-  });
-  initializeAppCheck(getApp(), { provider, isTokenAutoRefreshEnabled: true });
+  try {
+    const debug = __DEV__ || useFirebaseEmulators;
+    const debugToken = debug ? process.env.EXPO_PUBLIC_APP_CHECK_DEBUG_TOKEN : undefined;
+    const provider = new ReactNativeFirebaseAppCheckProvider();
+    provider.configure({
+      android: { provider: debug ? "debug" : "playIntegrity", ...(debugToken ? { debugToken } : {}) },
+      apple: { provider: debug ? "debug" : "appAttestWithDeviceCheckFallback", ...(debugToken ? { debugToken } : {}) },
+    });
+    initializeAppCheck(getApp(), { provider, isTokenAutoRefreshEnabled: true });
+  } catch (err) {
+    console.warn("App Check initialization skipped/failed safely:", err);
+  }
 }
 
 /** Must run before the first Auth, Firestore, or Functions request. */

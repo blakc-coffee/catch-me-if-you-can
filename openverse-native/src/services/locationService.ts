@@ -59,28 +59,30 @@ export async function startLocationUpdates(): Promise<TrackingPermissionResult> 
     await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS).catch(() => undefined);
   }
 
-  // 4. Request background permission
-  await Location.requestBackgroundPermissionsAsync().catch(() => undefined);
-
-  // 5. Try starting the OS background location task safely
+  // 4. Safely check background permission before starting OS background task
   try {
-    const taskAvailable = await TaskManager.isAvailableAsync().catch(() => false);
-    if (taskAvailable) {
-      const alreadyRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME).catch(() => false);
-      if (!alreadyRegistered) {
-        await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
-          accuracy: Location.Accuracy.High,
-          distanceInterval: 10,
-          timeInterval: 15000,
-          deferredUpdatesDistance: 25,
-          deferredUpdatesInterval: 30000,
-          pausesUpdatesAutomatically: false,
-          foregroundService: {
-            notificationTitle: "Openverse mission active",
-            notificationBody: "Recording your location for the current mission.",
-          },
-        });
+    const bgPerm = await Location.getBackgroundPermissionsAsync().catch(() => null);
+    if (bgPerm?.status === Location.PermissionStatus.GRANTED) {
+      const taskAvailable = await TaskManager.isAvailableAsync().catch(() => false);
+      if (taskAvailable) {
+        const alreadyRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME).catch(() => false);
+        if (!alreadyRegistered) {
+          await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
+            accuracy: Location.Accuracy.High,
+            distanceInterval: 10,
+            timeInterval: 15000,
+            deferredUpdatesDistance: 25,
+            deferredUpdatesInterval: 30000,
+            pausesUpdatesAutomatically: false,
+            foregroundService: {
+              notificationTitle: "Openverse mission active",
+              notificationBody: "Recording your location for the current mission.",
+            },
+          });
+        }
       }
+    } else {
+      void Location.requestBackgroundPermissionsAsync().catch(() => undefined);
     }
   } catch (bgError) {
     console.warn("Background location task not started (falling back to foreground tracking):", bgError);

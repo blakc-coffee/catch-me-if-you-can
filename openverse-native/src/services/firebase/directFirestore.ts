@@ -321,8 +321,21 @@ export async function directClaimArtifact(payload: string): Promise<ClaimArtifac
   }
 
   const points = (artifactData?.points as number) ?? 50;
+  let puzzleId = (artifactData?.puzzleId as string | undefined) ?? null;
+  if (!puzzleId) {
+    const ALL_PUZZLE_IDS = [
+      "case-01", "ch-01", "ch-02", "ch-03", "ch-04", "ch-05",
+      "ch-06", "ch-07", "ch-08", "ch-09", "ch-10", "ch-11",
+      "ch-12", "ch-13", "ch-14"
+    ];
+    const claimsSnap = await getDocs(
+      query(collection(db, "artifactClaims"), where("teamId", "==", teamId))
+    ).catch(() => null);
+    const index = (claimsSnap?.size ?? 0) % ALL_PUZZLE_IDS.length;
+    puzzleId = ALL_PUZZLE_IDS[index] ?? "case-01";
+  }
+
   const artifactName = (artifactData?.name as string) || `Artifact ${qrCode.slice(0, 8)}`;
-  const puzzleId = (artifactData?.puzzleId as string | undefined) || (qrCode.includes("397GdKBiwiNiia4l") || qrCode.includes("e7kvo8xeqtOSlJSu") ? "case-01" : null);
 
   await setDoc(claimRef, {
     teamId,
@@ -376,10 +389,11 @@ export async function directClaimArtifact(payload: string): Promise<ClaimArtifac
         question: (pData.question as string) || FALLBACK_PUZZLES[puzzleId]?.question || "Solve the anomaly to advance your mission.",
       };
     } else if (FALLBACK_PUZZLES[puzzleId]) {
+      const fb = FALLBACK_PUZZLES[puzzleId];
       puzzle = {
         puzzleId,
-        title: FALLBACK_PUZZLES[puzzleId].title,
-        question: FALLBACK_PUZZLES[puzzleId].question,
+        title: fb?.title ?? "The Case File",
+        question: fb?.question ?? "Solve the anomaly to advance your mission.",
       };
     } else {
       puzzle = {
