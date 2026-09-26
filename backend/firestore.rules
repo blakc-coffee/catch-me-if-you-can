@@ -85,6 +85,17 @@ service cloud.firestore {
       allow write: if signedIn();
     }
 
+    // Solvenseek hider challenge pool (web app at solvenseek.vercel.app)
+    match /challenges/{challengeId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn();
+    }
+
+    // Solvenseek broadcast cooldown singleton
+    match /system/{docId} {
+      allow read, write: if signedIn();
+    }
+
     // Default deny for unmapped paths
     match /{document=**} {
       allow read, write: if false;

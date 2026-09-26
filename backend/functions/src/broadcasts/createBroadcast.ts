@@ -1,4 +1,5 @@
-import { FieldValue, type Timestamp } from "firebase-admin/firestore";
+import { FieldValue } from "firebase-admin/firestore";
+import { lastPingMs } from "../lib/lastPing.js";
 import { z } from "zod";
 import { LIMITS } from "../config.js";
 import { loadActor, refs, requireGameActive, requireRole, type CallContext } from "../lib/context.js";
@@ -38,7 +39,7 @@ export async function createBroadcast(ctx: CallContext, raw: unknown): Promise<C
     const positions: BroadcastPosition[] = [];
     for (const s of (await tx.get(seekersQuery)).docs) {
       const seeker = s.data() as SeekerDoc;
-      const pingMs = (seeker.lastPing as Timestamp | null)?.toMillis() ?? 0;
+      const pingMs = lastPingMs(seeker.lastPing);
       if (pingMs < staleBefore || seeker.x === null || seeker.y === null) continue;
       positions.push({
         playerId: seeker.playerId,
@@ -62,7 +63,12 @@ export async function createBroadcast(ctx: CallContext, raw: unknown): Promise<C
       seekerPositions: positions.slice(0, LIMITS.maxBroadcastPositions),
     };
     const now = FieldValue.serverTimestamp();
-    tx.create(d.collection(COL.broadcasts).doc(broadcastId), { ...doc, createdAt: now });
+    tx.create(d.collection(COL.broadcasts).doc(broadcastId), {
+      ...doc,
+      createdAt: now,
+      /** Solvenseek surveillance UI orders by `timestamp`; keep both fields in sync. */
+      timestamp: now,
+    });
     tx.update(gameRef, { lastBroadcastAt: now, updatedAt: now });
 
     return { broadcastId, totalActiveSeekers: positions.length, nextBroadcastAtMs: nowMs + cooldownMs };

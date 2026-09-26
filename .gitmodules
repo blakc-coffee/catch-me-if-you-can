@@ -1,0 +1,3 @@
+[submodule "solvenseek"]
+	path = solvenseek
+	url = https://github.com/tovi-govi/solvenseek.git

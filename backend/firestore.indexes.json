@@ -18,6 +18,13 @@
       ]
     },
     {
+      "collectionGroup": "broadcasts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "artifactClaims",
       "queryScope": "COLLECTION",
       "fields": [

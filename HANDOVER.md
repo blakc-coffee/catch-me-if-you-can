@@ -33,7 +33,7 @@ React Native Android app
        └─ live and historical location data
 ```
 
-Firebase project: `seekerdb-9e679`
+Firebase project: `cmiyc-d170c`
 
 Android package: `com.openverse.seeker`
 

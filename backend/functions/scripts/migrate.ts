@@ -8,8 +8,8 @@
  *   - mirrors every puzzles/{id} into answer-free puzzlePublic/{id}
  *   - syncs custom claims {role, teamId} from each users doc
  *
- *   npm run migrate -- --project seekerdb-9e679 --production --dry-run
- *   npm run migrate -- --project seekerdb-9e679 --production
+ *   npm run migrate -- --project cmiyc-d170c --production --dry-run
+ *   npm run migrate -- --project cmiyc-d170c --production
  */
 import { parseArgs } from "node:util";
 import { getAuth } from "firebase-admin/auth";
