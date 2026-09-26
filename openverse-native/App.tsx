@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, BackHandler, Platform, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, AppState, BackHandler, Platform, StyleSheet, Text, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { getAuth, onAuthStateChanged, type User } from "@react-native-firebase/auth";
@@ -10,13 +10,14 @@ import { LoginScreen } from "./src/screens/LoginScreen";
 import { MissionScreen } from "./src/screens/MissionScreen";
 import { ScannerScreen } from "./src/screens/ScannerScreen";
 import { TrackingScreen } from "./src/screens/TrackingScreen";
-import { isTracking } from "./src/services/locationService";
+import { isTracking, resumeLocationUpdates, stopLocationUpdates } from "./src/services/locationService";
 import { localStore } from "./src/services/storage";
 import { applyClaim, initialGameState, listPuzzles, markSolved, mergeMissionPuzzles, selectPuzzle } from "./src/services/session/gameState";
 import { summarizeMission, type MissionLoad } from "./src/services/session/missionView";
 import { sameScope } from "./src/services/session/scope";
-import { enforceAuthorization, handleAuthChange, scopeForCurrentUser, signOutSafely } from "./src/services/session/sessionRuntime";
-import { profileSyncFailure, scopeKeyOf, startupPhase, type ProfileSync } from "./src/services/session/startup";
+import { enforceAuthorization, handleAuthChange, scopeForCurrentUser, signOutSafely, syncLocationQueue } from "./src/services/session/sessionRuntime";
+import { snapshotData } from "./src/services/session/snapshotData";
+import { firestoreErrorCode, profileSyncFailure, scopeKeyOf, shouldRetryAccountListener, startupPhase, type ProfileSync } from "./src/services/session/startup";
 import { SessionChangedError, SessionGuard } from "./src/services/session/sessionGuard";
 import { evaluateTracking, eventIdOf, type GameSnapshot, type ProfileSnapshot } from "./src/services/session/trackingPolicy";
 import { colors } from "./src/theme";
@@ -31,6 +32,8 @@ export default function App() {
   const [route, setRoute] = useState<AppRoute>("mission");
   const [authResolved, setAuthResolved] = useState(Platform.OS === "web");
   const [user, setUser] = useState<User | null>(null);
+  /** Set only after this user's ID token is available to Firestore. */
+  const [authTokenUid, setAuthTokenUid] = useState<string | null>(null);
   const [profileSync, setProfileSync] = useState<ProfileSync>("pending");
   const [listenerFailures, setListenerFailures] = useState({ profile: false, game: false });
   const [listenerAttempt, setListenerAttempt] = useState(0);
@@ -45,6 +48,7 @@ export default function App() {
   const authEpoch = useRef(0);
   const sessionGuard = useRef(new SessionGuard());
   const missionRequest = useRef(0);
+  const listenerRetries = useRef(0);
 
   const uid = user?.uid ?? null;
 
@@ -97,46 +101,85 @@ export default function App() {
         setRoute("mission");
         setProfileSync("pending");
         setUser(nextUser);
+        setAuthTokenUid(null);
         setAuthResolved(true);
-        if (nextUser) await syncProfile(nextUser, epoch);
+        if (nextUser) {
+          // Firestore rejects listeners that start before the ID token is attached,
+          // and that error is terminal until the listener is recreated.
+          await nextUser.getIdToken().catch((error) => console.warn("ID token unavailable", error));
+          if (epoch !== authEpoch.current || getAuth().currentUser?.uid !== nextUser.uid) return;
+          setAuthTokenUid(nextUser.uid);
+          await syncProfile(nextUser, epoch);
+        }
       });
     });
     return unsubscribe;
   }, [syncProfile]);
 
+  useEffect(() => {
+    listenerRetries.current = 0;
+  }, [uid]);
+
   // Live authorization inputs: the users doc is the server's authority for
   // role, team and status; game/state for the game lifecycle and event id.
+  // Subscribed only after the ID token exists, and a warmup permission error
+  // resubscribes instead of blocking the mission screen.
   useEffect(() => {
-    if (!uid || Platform.OS === "web") return;
+    if (!uid || uid !== authTokenUid || Platform.OS === "web") return;
+    let active = true;
+    let retryScheduled = false;
     setListenerFailures({ profile: false, game: false });
     const db = getFirestore();
+    const failListener = (which: "profile" | "game", error: unknown) => {
+      if (!active) return;
+      console.warn(which === "profile" ? "Profile listener failed" : "Game listener failed", error);
+      if (!retryScheduled && shouldRetryAccountListener(firestoreErrorCode(error), listenerRetries.current)) {
+        retryScheduled = true;
+        listenerRetries.current += 1;
+        active = false;
+        const retryUid = uid;
+        const current = getAuth().currentUser;
+        void Promise.resolve(current ? current.getIdToken(true) : undefined)
+          .catch(() => undefined)
+          .finally(() => {
+            if (getAuth().currentUser?.uid === retryUid) setListenerAttempt((attempt) => attempt + 1);
+          });
+        return;
+      }
+      setListenerFailures((current) => ({ ...current, [which]: true }));
+    };
     const stopProfile = onSnapshot(
       doc(db, "users", uid),
       (snap) => {
-        setProfile(snap.exists() ? (snap.data() as ProfileSnapshot) : null);
-        setListenerFailures((current) => ({ ...current, profile: false }));
+        if (!active) return;
+        try {
+          setProfile(snapshotData<ProfileSnapshot>(snap));
+          setListenerFailures((current) => ({ ...current, profile: false }));
+        } catch (error) {
+          failListener("profile", error);
+        }
       },
-      (error) => {
-        console.warn("Profile listener failed", error);
-        setListenerFailures((current) => ({ ...current, profile: true }));
-      },
+      (error) => failListener("profile", error),
     );
     const stopGame = onSnapshot(
       doc(db, "game", "state"),
       (snap) => {
-        setGameDoc(snap.exists() ? (snap.data() as GameSnapshot) : null);
-        setListenerFailures((current) => ({ ...current, game: false }));
+        if (!active) return;
+        try {
+          setGameDoc(snapshotData<GameSnapshot>(snap));
+          setListenerFailures((current) => ({ ...current, game: false }));
+        } catch (error) {
+          failListener("game", error);
+        }
       },
-      (error) => {
-        console.warn("Game listener failed", error);
-        setListenerFailures((current) => ({ ...current, game: true }));
-      },
+      (error) => failListener("game", error),
     );
     return () => {
+      active = false;
       stopProfile();
       stopGame();
     };
-  }, [listenerAttempt, uid]);
+  }, [authTokenUid, listenerAttempt, uid]);
 
   const eventId = gameDoc === undefined ? null : eventIdOf(gameDoc);
   const scope = useMemo(() => (uid && eventId ? scopeForCurrentUser({ eventId }) : null), [uid, eventId]);
@@ -149,20 +192,27 @@ export default function App() {
   const decision = useMemo(() => evaluateTracking({ uid, profile, game: gameDoc }), [uid, profile, gameDoc]);
   const decisionKey = decision.allowed === false ? decision.reason : String(decision.allowed);
 
-  // This account's local progress for this event.
+  // This account's local progress for this event. If the user already started
+  // tracking, bring the OS watchers back (a permission grant or process restart
+  // can drop them while the scope is still collecting).
   useEffect(() => {
     let cancelled = false;
     if (!scope) return;
     void Promise.all([localStore.loadGameState(scope), localStore.getActiveScope(), isTracking()]).then(([stored, active, running]) => {
       if (cancelled) return;
       setGame(stored);
-      setTracking(Boolean(active?.collecting && sameScope(active, scope) && running));
+      const collectingHere = Boolean(active?.collecting && sameScope(active, scope));
+      // The keepalive below owns an authorized collecting session, so a stale
+      // "task not registered" read here cannot clear it after a permission grant.
+      if (!(collectingHere && decision.allowed === true)) {
+        setTracking(collectingHere && running);
+      }
       setLocalStateKey(scopeKeyOf(scope));
     });
     return () => {
       cancelled = true;
     };
-  }, [scope]);
+  }, [decision.allowed, scope]);
 
   // Stop tracking the moment the user is no longer an active seeker in an active game.
   useEffect(() => {
@@ -193,6 +243,44 @@ export default function App() {
   });
   const ready = phase === "ready";
   const onlineAuthorized = profileSync === "ok" && !listenerFailures.profile && !listenerFailures.game;
+
+  // While this seeker is collecting in a live game, keep the OS watcher alive and
+  // push queued fixes — including after a permission dialog pauses the activity.
+  // Runs on every screen for the rest of the game, not only Location Control.
+  useEffect(() => {
+    if (!scope || decision.allowed !== true) return;
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled) return;
+      const active = await localStore.getActiveScope();
+      if (cancelled || !active?.collecting || !sameScope(active, scope)) return;
+      try {
+        const running = await resumeLocationUpdates({ adopt: true });
+        const still = await localStore.getActiveScope();
+        if (cancelled || !still?.collecting || !sameScope(still, scope)) {
+          // Authorization was withdrawn while the watcher was restarting.
+          await stopLocationUpdates();
+          if (!cancelled) setTracking(false);
+          return;
+        }
+        if (running) setTracking(true);
+      } catch (error) {
+        console.warn("Location resume failed", error);
+      }
+      if (cancelled || !onlineAuthorized) return;
+      await syncLocationQueue(scope, decision).catch((error) => console.warn("Location sync failed", error));
+    };
+    void tick();
+    const timer = setInterval(() => void tick(), 15_000);
+    const subscription = AppState.addEventListener("change", (next) => {
+      if (next === "active") void tick();
+    });
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      subscription.remove();
+    };
+  }, [decision, onlineAuthorized, scope]);
 
   // Server-backed mission state: team progress, totals and unlocked puzzles.
   const refreshMission = useCallback(async () => {
@@ -264,6 +352,7 @@ export default function App() {
 
   const retryOnline = useCallback(() => {
     if (!user) return;
+    listenerRetries.current = 0;
     setListenerFailures({ profile: false, game: false });
     setProfile(undefined);
     setGameDoc(undefined);

@@ -1,6 +1,6 @@
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
-import { LOCATION_TASK_NAME } from "./locationService";
+import { LOCATION_TASK_NAME, noteLocationSample } from "./locationService";
 import { onBackgroundSamples } from "./session/sessionRuntime";
 import type { StoredPosition } from "../types";
 
@@ -22,6 +22,7 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
       speed: coords.speed,
       timestamp,
     }));
+    for (const sample of samples) noteLocationSample(sample.timestamp);
 
     await onBackgroundSamples(samples);
   } catch (err) {

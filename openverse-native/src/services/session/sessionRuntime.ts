@@ -7,7 +7,8 @@ import { startLocationUpdates, stopLocationUpdates } from "../locationService";
 import { localStore } from "../storage";
 import { createScope, type StorageScope } from "./scope";
 import { syncLocationQueue as syncCore, type SyncResult } from "./telemetrySyncCore";
-import { eventIdOf, type GameSnapshot, type TrackingDecision } from "./trackingPolicy";
+import { snapshotData } from "./snapshotData";
+import { eventIdOf, type GameSnapshot, type ProfileSnapshot, type TrackingDecision } from "./trackingPolicy";
 import * as session from "./trackingSession";
 
 /** Production wiring of the tracking session to Firebase, AsyncStorage and expo-location. */
@@ -62,20 +63,16 @@ export async function signOutSafely(): Promise<void> {
   });
 }
 
-/** Headless background-task gate (see createBackgroundGate). */
+/**
+ * Headless background-task gate (see createBackgroundGate).
+ * A failed read must throw: the gate keeps collecting while offline. Returning
+ * null documents is a definitive "profile/game missing" denial and stops tracking.
+ */
 export const onBackgroundSamples = session.createBackgroundGate(sessionDeps, async (uid) => {
-  try {
-    const db = getFirestore();
-    const [profile, game] = await Promise.all([
-      getDoc(doc(db, "users", uid)).catch(() => null),
-      getDoc(doc(db, "game", "state")).catch(() => null),
-    ]);
-    return {
-      profile: profile && typeof profile.exists === "function" && profile.exists() ? (profile.data() ?? null) : null,
-      game: game && typeof game.exists === "function" && game.exists() ? (game.data() ?? null) : null,
-    };
-  } catch (err) {
-    console.warn("fetchAuthorization in background failed safely:", err);
-    return { profile: null, game: null };
-  }
+  const db = getFirestore();
+  const [profile, game] = await Promise.all([getDoc(doc(db, "users", uid)), getDoc(doc(db, "game", "state"))]);
+  return {
+    profile: snapshotData<ProfileSnapshot>(profile),
+    game: snapshotData<GameSnapshot>(game),
+  };
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createScope } from "./scope";
-import { profileSyncFailure, scopeKeyOf, startupPhase, trackingSyncKey } from "./startup";
+import { firestoreErrorCode, profileSyncFailure, scopeKeyOf, shouldRetryAccountListener, startupPhase, trackingSyncKey } from "./startup";
 import { evaluateTracking } from "./trackingPolicy";
 
 const A = createScope("uidA", "event-1");
@@ -40,6 +40,17 @@ describe("startup phase", () => {
     expect(startupPhase({ ...readyInput, localStateKey: null })).toBe("loading-account");
     expect(startupPhase({ ...readyInput, localStateKey: scopeKeyOf(createScope("uidB", "event-1")) })).toBe("loading-account");
     expect(startupPhase({ ...readyInput, localStateKey: scopeKeyOf(createScope("uidA", "event-0")) })).toBe("loading-account");
+  });
+
+  it("retries a listener that failed before the ID token reached Firestore", () => {
+    expect(firestoreErrorCode({ code: "firestore/permission-denied" })).toBe("permission-denied");
+    expect(firestoreErrorCode({ code: "unavailable" })).toBe("unavailable");
+    expect(firestoreErrorCode(new Error("no code"))).toBeNull();
+    expect(shouldRetryAccountListener("permission-denied", 0)).toBe(true);
+    expect(shouldRetryAccountListener("unauthenticated", 2)).toBe(true);
+    expect(shouldRetryAccountListener("permission-denied", 3)).toBe(false);
+    expect(shouldRetryAccountListener(null, 0)).toBe(true);
+    expect(shouldRetryAccountListener("failed-precondition", 0)).toBe(false);
   });
 
   it("signs out only for terminal profile failures; network trouble is retryable", () => {
