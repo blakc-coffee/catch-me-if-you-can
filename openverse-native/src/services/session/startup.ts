@@ -53,6 +53,38 @@ export function scopeKeyOf(scope: StorageScope | null): string | null {
   return scope ? `${scope.uid}/${scope.eventId}` : null;
 }
 
+const RETRYABLE_LISTENER_CODES = new Set([
+  "permission-denied",
+  "unauthenticated",
+  "unavailable",
+  "deadline-exceeded",
+  "cancelled",
+  "aborted",
+  "internal",
+  "unknown",
+]);
+
+/** Firestore native errors use `firestore/<code>` or a bare code. */
+export function firestoreErrorCode(error: unknown): string | null {
+  if (!error || typeof error !== "object" || !("code" in error)) return null;
+  const code = (error as { code?: unknown }).code;
+  if (typeof code !== "string" || code.length === 0) return null;
+  const slash = code.lastIndexOf("/");
+  return slash >= 0 ? code.slice(slash + 1) : code;
+}
+
+/**
+ * A listener attached in the same turn as sign-in often fails once with
+ * permission-denied before the ID token reaches Firestore, and that listener
+ * never recovers. Retry those failures (and transport blips) a few times
+ * after refreshing the token. A later failure is shown to the user.
+ */
+export function shouldRetryAccountListener(code: string | null, attempt: number, maxAttempts = 3): boolean {
+  if (attempt >= maxAttempts) return false;
+  if (code == null) return true;
+  return RETRYABLE_LISTENER_CODES.has(code);
+}
+
 /**
  * The tracking screen synchronizes when this key changes (or on explicit
  * refresh), not on every profile/game snapshot: score or name updates leave
