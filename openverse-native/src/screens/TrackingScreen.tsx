@@ -87,7 +87,7 @@ export function TrackingScreen({ online, active, scope, decision, onTrackingChan
     try {
       if (active) {
         await syncLocationQueue(scope, decision).catch(() => undefined);
-        await stopTrackingByUser();
+        await stopTrackingByUser().catch(() => undefined);
         onTrackingChange(false);
       } else {
         const result = await startTracking(scope, decision);
@@ -111,6 +111,9 @@ export function TrackingScreen({ online, active, scope, decision, onTrackingChan
           Alert.alert("Tracking unavailable", DENIAL_MESSAGES[result.reason] ?? "Tracking is only available to active seekers during a live mission.");
         }
       }
+    } catch (err) {
+      console.warn("Tracking toggle error:", err);
+      Alert.alert("Tracking error", "An error occurred while starting tracking. Please check permissions.");
     } finally {
       setBusy(false);
       await refresh();

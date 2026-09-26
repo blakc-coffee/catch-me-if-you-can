@@ -36,8 +36,6 @@ export interface KeyValueStore {
 
 export const MAX_LOCATION_SAMPLES = 500;
 
-export { initialGameState };
-
 function parseArray<T>(raw: string | null): T[] {
   if (!raw) return [];
   try {
@@ -93,10 +91,6 @@ export class ScopedStore {
       const active = await this.getActiveScope();
       if (active?.collecting) await this.kv.setItem(ACTIVE_SCOPE_KEY, JSON.stringify({ ...active, collecting: false }));
     });
-  }
-
-  clearActiveScope(): Promise<void> {
-    return this.exclusive(() => this.kv.removeItem(ACTIVE_SCOPE_KEY));
   }
 
   // ------------------------------------------------------------ game progress

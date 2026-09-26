@@ -1,6 +1,6 @@
 import { Platform } from "react-native";
 import { getAuth } from "@react-native-firebase/auth";
-import { doc, getDocFromServer, getFirestore } from "@react-native-firebase/firestore";
+import { doc, getDoc, getFirestore } from "@react-native-firebase/firestore";
 import { GoogleSignin } from "@react-native-google-signin/google-signin";
 import { getCallableReason, stopRemoteTracking, updateTelemetry, uploadLocationBatch } from "../firebase/callables";
 import { startLocationUpdates, stopLocationUpdates } from "../locationService";
@@ -11,7 +11,7 @@ import { eventIdOf, type GameSnapshot, type TrackingDecision } from "./trackingP
 import * as session from "./trackingSession";
 
 /** Production wiring of the tracking session to Firebase, AsyncStorage and expo-location. */
-export const sessionDeps: session.TrackingSessionDeps = {
+const sessionDeps: session.TrackingSessionDeps = {
   store: localStore,
   currentUid: () => getAuth().currentUser?.uid ?? null,
   startLocationUpdates,
@@ -64,10 +64,18 @@ export async function signOutSafely(): Promise<void> {
 
 /** Headless background-task gate (see createBackgroundGate). */
 export const onBackgroundSamples = session.createBackgroundGate(sessionDeps, async (uid) => {
-  const db = getFirestore();
-  const [profile, game] = await Promise.all([getDocFromServer(doc(db, "users", uid)), getDocFromServer(doc(db, "game", "state"))]);
-  return {
-    profile: profile.exists() ? (profile.data() ?? null) : null,
-    game: game.exists() ? (game.data() ?? null) : null,
-  };
+  try {
+    const db = getFirestore();
+    const [profile, game] = await Promise.all([
+      getDoc(doc(db, "users", uid)).catch(() => null),
+      getDoc(doc(db, "game", "state")).catch(() => null),
+    ]);
+    return {
+      profile: profile && typeof profile.exists === "function" && profile.exists() ? (profile.data() ?? null) : null,
+      game: game && typeof game.exists === "function" && game.exists() ? (game.data() ?? null) : null,
+    };
+  } catch (err) {
+    console.warn("fetchAuthorization in background failed safely:", err);
+    return { profile: null, game: null };
+  }
 });

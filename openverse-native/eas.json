@@ -10,11 +10,16 @@
     },
     "preview": {
       "distribution": "internal",
+      "channel": "preview",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_USE_FIREBASE_EMULATORS": "false"
       }
     },
     "production": {
+      "channel": "production",
       "android": {
         "buildType": "app-bundle"
       }

@@ -54,8 +54,6 @@ export const LIMITS = {
   sampleMaxAgeMs: 7 * 24 * 60 * 60 * 1000,
   /** Tolerated device clock drift into the future. */
   clockSkewFutureMs: 5 * 60 * 1000,
-  /** Live telemetry older than this should go through uploadLocationBatch instead. */
-  telemetryMaxAgeMs: 10 * 60 * 1000,
 
   maxBroadcastPositions: 200,
 } as const;

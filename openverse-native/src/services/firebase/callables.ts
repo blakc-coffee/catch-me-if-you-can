@@ -18,6 +18,17 @@ import {
   type UploadLocationBatchRequest,
   type UploadLocationBatchResponse,
 } from "./contract";
+import { useFirebaseEmulators } from "./config";
+import {
+  directClaimArtifact,
+  directCreateOrSyncProfile,
+  directDeleteRemoteLocationHistory,
+  directGetMissionState,
+  directStopRemoteTracking,
+  directSubmitPuzzleAnswer,
+  directUpdateTelemetry,
+  directUploadLocationBatch,
+} from "./directFirestore";
 
 const functions = () => getFunctions(undefined, FUNCTIONS_REGION);
 
@@ -27,39 +38,132 @@ async function call<Req, Res>(name: string, data: Req): Promise<Res> {
 }
 
 export async function createOrSyncProfile(
-  data: CreateOrSyncProfileRequest = {},
+  data: CreateOrSyncProfileRequest = {}
 ): Promise<CreateOrSyncProfileResponse> {
-  const response = await call<CreateOrSyncProfileRequest, CreateOrSyncProfileResponse>(
-    CALLABLES.createOrSyncProfile,
-    data,
-  );
-  if (response.claimsUpdated) await getAuth().currentUser?.getIdToken(true);
-  return response;
+  if (!useFirebaseEmulators) {
+    return directCreateOrSyncProfile(data);
+  }
+  try {
+    const response = await call<CreateOrSyncProfileRequest, CreateOrSyncProfileResponse>(
+      CALLABLES.createOrSyncProfile,
+      data
+    );
+    if (response.claimsUpdated) await getAuth().currentUser?.getIdToken(true);
+    return response;
+  } catch (err) {
+    console.warn("Callable createOrSyncProfile failed, falling back to direct Firestore", err);
+    return directCreateOrSyncProfile(data);
+  }
 }
 
-export const claimArtifact = (payload: string) =>
-  call<ClaimArtifactRequest, ClaimArtifactResponse>(CALLABLES.claimArtifact, { payload });
+export const claimArtifact = async (payload: string): Promise<ClaimArtifactResponse> => {
+  if (!useFirebaseEmulators) {
+    return directClaimArtifact(payload);
+  }
+  try {
+    return await call<ClaimArtifactRequest, ClaimArtifactResponse>(CALLABLES.claimArtifact, { payload });
+  } catch (err) {
+    console.warn("Callable claimArtifact failed, falling back to direct Firestore", err);
+    return directClaimArtifact(payload);
+  }
+};
 
-export const submitPuzzleAnswer = (puzzleId: string, answer: string) =>
-  call<SubmitPuzzleAnswerRequest, SubmitPuzzleAnswerResponse>(CALLABLES.submitPuzzleAnswer, {
-    puzzleId,
-    answer,
-  });
+export const submitPuzzleAnswer = async (
+  puzzleId: string,
+  answer: string
+): Promise<SubmitPuzzleAnswerResponse> => {
+  if (!useFirebaseEmulators) {
+    return directSubmitPuzzleAnswer(puzzleId, answer);
+  }
+  try {
+    return await call<SubmitPuzzleAnswerRequest, SubmitPuzzleAnswerResponse>(
+      CALLABLES.submitPuzzleAnswer,
+      {
+        puzzleId,
+        answer,
+      }
+    );
+  } catch (err) {
+    console.warn("Callable submitPuzzleAnswer failed, falling back to direct Firestore", err);
+    return directSubmitPuzzleAnswer(puzzleId, answer);
+  }
+};
 
-export const updateTelemetry = (data: UpdateTelemetryRequest) =>
-  call<UpdateTelemetryRequest, UpdateTelemetryResponse>(CALLABLES.updateTelemetry, data);
+export const updateTelemetry = async (
+  data: UpdateTelemetryRequest
+): Promise<UpdateTelemetryResponse> => {
+  if (!useFirebaseEmulators) {
+    return directUpdateTelemetry(data);
+  }
+  try {
+    return await call<UpdateTelemetryRequest, UpdateTelemetryResponse>(
+      CALLABLES.updateTelemetry,
+      data
+    );
+  } catch (err) {
+    console.warn("Callable updateTelemetry failed, falling back to direct Firestore", err);
+    return directUpdateTelemetry(data);
+  }
+};
 
-export const uploadLocationBatch = (data: UploadLocationBatchRequest) =>
-  call<UploadLocationBatchRequest, UploadLocationBatchResponse>(CALLABLES.uploadLocationBatch, data);
+export const uploadLocationBatch = async (
+  data: UploadLocationBatchRequest
+): Promise<UploadLocationBatchResponse> => {
+  if (!useFirebaseEmulators) {
+    return directUploadLocationBatch(data);
+  }
+  try {
+    return await call<UploadLocationBatchRequest, UploadLocationBatchResponse>(
+      CALLABLES.uploadLocationBatch,
+      data
+    );
+  } catch (err) {
+    console.warn("Callable uploadLocationBatch failed, falling back to direct Firestore", err);
+    return directUploadLocationBatch(data);
+  }
+};
 
-export const getMissionState = () =>
-  call<GetMissionStateRequest, GetMissionStateResponse>(CALLABLES.getMissionState, {});
+export const getMissionState = async (): Promise<GetMissionStateResponse> => {
+  if (!useFirebaseEmulators) {
+    return directGetMissionState();
+  }
+  try {
+    return await call<GetMissionStateRequest, GetMissionStateResponse>(
+      CALLABLES.getMissionState,
+      {}
+    );
+  } catch (err) {
+    console.warn("Callable getMissionState failed, falling back to direct Firestore", err);
+    return directGetMissionState();
+  }
+};
 
-export const stopRemoteTracking = () =>
-  call<Record<string, never>, StopTrackingResponse>(CALLABLES.stopTracking, {});
+export const stopRemoteTracking = async (): Promise<StopTrackingResponse> => {
+  if (!useFirebaseEmulators) {
+    return directStopRemoteTracking();
+  }
+  try {
+    return await call<Record<string, never>, StopTrackingResponse>(CALLABLES.stopTracking, {});
+  } catch (err) {
+    console.warn("Callable stopRemoteTracking failed, falling back to direct Firestore", err);
+    return directStopRemoteTracking();
+  }
+};
 
-export const deleteRemoteLocationHistory = () =>
-  call<Record<string, never>, DeleteLocationHistoryResponse>(CALLABLES.deleteLocationHistory, {});
+export const deleteRemoteLocationHistory = async (): Promise<DeleteLocationHistoryResponse> => {
+  if (!useFirebaseEmulators) {
+    return directDeleteRemoteLocationHistory();
+  }
+  try {
+    return await call<Record<string, never>, DeleteLocationHistoryResponse>(
+      CALLABLES.deleteLocationHistory,
+      {}
+    );
+  } catch (err) {
+    console.warn("Callable deleteRemoteLocationHistory failed, falling back to direct Firestore", err);
+    return directDeleteRemoteLocationHistory();
+  }
+};
 
 export function getCallableReason(error: unknown): string | null {
   if (!error || typeof error !== "object") return null;

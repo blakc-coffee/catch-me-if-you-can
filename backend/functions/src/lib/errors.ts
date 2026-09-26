@@ -13,10 +13,3 @@ export function fail(
 ): never {
   throw new HttpsError(code, message, { reason, ...extra } satisfies CallableErrorDetails);
 }
-
-export function reasonOf(err: unknown): ErrorReason | undefined {
-  if (err instanceof HttpsError) {
-    return (err.details as CallableErrorDetails | undefined)?.reason;
-  }
-  return undefined;
-}

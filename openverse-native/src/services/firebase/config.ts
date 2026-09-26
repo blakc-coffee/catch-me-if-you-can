@@ -9,7 +9,7 @@ import { FUNCTIONS_REGION } from "./contract";
 export const useFirebaseEmulators = process.env.EXPO_PUBLIC_USE_FIREBASE_EMULATORS === "true";
 
 const defaultHost = Platform.OS === "android" ? "10.0.2.2" : "127.0.0.1";
-export const firebaseEmulatorHost = process.env.EXPO_PUBLIC_FIREBASE_EMULATOR_HOST ?? defaultHost;
+const firebaseEmulatorHost = process.env.EXPO_PUBLIC_FIREBASE_EMULATOR_HOST ?? defaultHost;
 
 let configured = false;
 
