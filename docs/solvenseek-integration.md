@@ -80,6 +80,10 @@ Register codes in Firestore:
 cd backend && npm run seed -- --production --project cmiyc-d170c --data ./functions/scripts/seed-data.example.json
 ```
 
+## Deployment
+
+From `backend/`, copy `.firebaserc.example` to `.firebaserc` and set `"default"` to `cmiyc-d170c` (keep `"dev": "demo-openverse"` for emulators).
+
 ## Submodule updates
 
 ```bash

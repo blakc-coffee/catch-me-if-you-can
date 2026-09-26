@@ -57,7 +57,7 @@ Openverse Seeker ("Catch Me If You Can") is a multi-part Alternate Reality Game 
   - `telemetrySyncCore.ts`: FIFO batch upload (up to 200 samples/batch) to `uploadLocationBatch` and live position sync via `updateTelemetry`. Samples are purged only upon server confirmation.
 
 ### B. Firebase Backend (`backend/`)
-- **Project ID:** `seekerdb-9e679` (Functions Region: `asia-south1`).
+- **Project ID:** `cmiyc-d170c` (Functions Region: `asia-south1`).
 - **Callable Cloud Functions:**
   - `createOrSyncProfile`: Verifies `@iiitkottayam.ac.in` domain and mirrors claims.
   - `getMissionState`: Provides team progress, total active artifacts, and unlocked puzzles (without answers).

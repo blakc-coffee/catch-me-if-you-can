@@ -147,7 +147,7 @@ npm run test:emulator
 
 ---
 
-## ☁️ Deploying to Production (Firebase `seekerdb-9e679`)
+## ☁️ Deploying to Production (Firebase `cmiyc-d170c`)
 
 When deploying to the actual production project:
 
@@ -157,7 +157,7 @@ When deploying to the actual production project:
    ```
 2. Preview migration (dry run):
    ```powershell
-   npm run migrate -- --project seekerdb-9e679 --production --dry-run
+   npm run migrate -- --project cmiyc-d170c --production --dry-run
    ```
 3. Deploy Firestore rules, indexes, and Cloud Functions:
    ```powershell
@@ -165,5 +165,5 @@ When deploying to the actual production project:
    ```
 4. Run live migration:
    ```powershell
-   npm run migrate -- --project seekerdb-9e679 --production
+   npm run migrate -- --project cmiyc-d170c --production
    ```

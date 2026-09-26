@@ -193,28 +193,28 @@ The app's session logic has its own tests (`cd openverse-native && npm test`). T
 
 After changing `functions/src/shared/contract.ts`, run `npm run sync:contract`. A unit test fails if the app's copy drifts.
 
-## Activation checklist for `seekerdb-9e679`
+## Activation checklist for `cmiyc-d170c`
 
 Already in place: the Android app `com.openverse.seeker` is registered, `google-services.json` is in `openverse-native/` (git-ignored), `.firebaserc` points at the project, Firestore (default) is in `asia-south1`, and Email/Password sign-in is enabled.
 
 1. **Enable billing (Blaze plan)** under Firebase console → Usage and billing. Cloud Functions can't deploy without it.
-2. **Preview the migration:** `npm run migrate -- --project seekerdb-9e679 --production --dry-run`. It is additive only:
+2. **Preview the migration:** `npm run migrate -- --project cmiyc-d170c --production --dry-run`. It is additive only:
    - creates `game/state` if it's missing, or adds an `eventId` to it;
    - backfills `playerId`, `status`, `score` and `eliminationTokens` on users;
    - mirrors puzzles into `puzzlePublic`;
    - syncs `{role, teamId}` claims.
 3. **Deploy:** `npm run deploy`. This deploys rules, indexes, TTL policies and functions. Then, in the console under Firestore → Indexes, confirm the composite indexes are built and TTL is on for `locationBatches.expireAt` and `rateLimits.expireAt`.
-4. **Migrate:** `npm run migrate -- --project seekerdb-9e679 --production`. Scripts use your `firebase login`, or Application Default Credentials if `GOOGLE_APPLICATION_CREDENTIALS` is set. No service-account keys are needed.
+4. **Migrate:** `npm run migrate -- --project cmiyc-d170c --production`. Scripts use your `firebase login`, or Application Default Credentials if `GOOGLE_APPLICATION_CREDENTIALS` is set. No service-account keys are needed.
 5. **Add real content:** admins can add teams, artifacts, puzzles and areas in the console as before, or seed them from a **private** file:
    ```bash
-   npm run seed -- --production --project seekerdb-9e679 --data /secure/path/game.json
+   npm run seed -- --production --project cmiyc-d170c --data /secure/path/game.json
    ```
-   Print the QR codes from `functions/seed-output/seekerdb-9e679-qr-codes.csv`, then store or delete that CSV securely.
-6. **Place players:** send them team codes (`joinTeam`), or have an admin call `assignUser`. To make someone admin from the CLI, run `npm run grant-admin -- --email you@example.com --project seekerdb-9e679 --production`.
+   Print the QR codes from `functions/seed-output/cmiyc-d170c-qr-codes.csv`, then store or delete that CSV securely.
+6. **Place players:** send them team codes (`joinTeam`), or have an admin call `assignUser`. To make someone admin from the CLI, run `npm run grant-admin -- --email you@example.com --project cmiyc-d170c --production`.
 7. **Set up App Check before the first functions deploy.** Sensitive callables enforce it by default.
    - Register the Android app with **Play Integrity**; it needs the app's **SHA-256** from `npx eas-cli credentials -p android`.
    - For dev builds, register a debug token and set `EXPO_PUBLIC_APP_CHECK_DEBUG_TOKEN` (development only).
-   - Optionally set `ENFORCE_APP_CHECK=true` in `functions/.env.seekerdb-9e679` to enforce every callable.
+   - Optionally set `ENFORCE_APP_CHECK=true` in `functions/.env.cmiyc-d170c` to enforce every callable.
 8. **Build the APK.** For EAS cloud builds, first upload the config file:
    ```bash
    cd openverse-native
