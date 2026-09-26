@@ -3,7 +3,9 @@ import { ActivityIndicator, AppState, BackHandler, Platform, StyleSheet, Text, V
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { getAuth, onAuthStateChanged, type User } from "@react-native-firebase/auth";
-import { doc, getFirestore, onSnapshot } from "@react-native-firebase/firestore";
+import { subscribeToGameState, subscribeToProfile } from "./src/services/convex/listeners";
+import { convexConfigured } from "./src/services/convex/client";
+import { useFirebaseEmulators } from "./src/services/firebase/config";
 import { Card, PrimaryButton } from "./src/components/Primitives";
 import { CaseScreen } from "./src/screens/CaseScreen";
 import { LoginScreen } from "./src/screens/LoginScreen";
@@ -124,16 +126,22 @@ export default function App() {
   // role, team and status; game/state for the game lifecycle and event id.
   // Subscribed only after the ID token exists, and a warmup permission error
   // resubscribes instead of blocking the mission screen.
+  const useConvexBackend = convexConfigured() && !useFirebaseEmulators;
+
   useEffect(() => {
     if (!uid || uid !== authTokenUid || Platform.OS === "web") return;
     let active = true;
     let retryScheduled = false;
     setListenerFailures({ profile: false, game: false });
-    const db = getFirestore();
+
     const failListener = (which: "profile" | "game", error: unknown) => {
       if (!active) return;
       console.warn(which === "profile" ? "Profile listener failed" : "Game listener failed", error);
-      if (!retryScheduled && shouldRetryAccountListener(firestoreErrorCode(error), listenerRetries.current)) {
+      if (
+        !useConvexBackend &&
+        !retryScheduled &&
+        shouldRetryAccountListener(firestoreErrorCode(error), listenerRetries.current)
+      ) {
         retryScheduled = true;
         listenerRetries.current += 1;
         active = false;
@@ -148,9 +156,38 @@ export default function App() {
       }
       setListenerFailures((current) => ({ ...current, [which]: true }));
     };
+
+    if (useConvexBackend) {
+      const stopProfile = subscribeToProfile(
+        uid,
+        (nextProfile) => {
+          if (!active) return;
+          setProfile(nextProfile);
+          setListenerFailures((current) => ({ ...current, profile: false }));
+        },
+        (error) => failListener("profile", error),
+      );
+      const stopGame = subscribeToGameState(
+        (nextGame) => {
+          if (!active) return;
+          setGameDoc(nextGame);
+          setListenerFailures((current) => ({ ...current, game: false }));
+        },
+        (error) => failListener("game", error),
+      );
+      return () => {
+        active = false;
+        stopProfile();
+        stopGame();
+      };
+    }
+
+    // Legacy Firestore listeners (emulator mode only)
+    const { doc, getFirestore, onSnapshot } = require("@react-native-firebase/firestore");
+    const db = getFirestore();
     const stopProfile = onSnapshot(
       doc(db, "users", uid),
-      (snap) => {
+      (snap: Parameters<typeof snapshotData>[0]) => {
         if (!active) return;
         try {
           setProfile(snapshotData<ProfileSnapshot>(snap));
@@ -159,11 +196,11 @@ export default function App() {
           failListener("profile", error);
         }
       },
-      (error) => failListener("profile", error),
+      (error: unknown) => failListener("profile", error),
     );
     const stopGame = onSnapshot(
       doc(db, "game", "state"),
-      (snap) => {
+      (snap: Parameters<typeof snapshotData>[0]) => {
         if (!active) return;
         try {
           setGameDoc(snapshotData<GameSnapshot>(snap));
@@ -172,14 +209,14 @@ export default function App() {
           failListener("game", error);
         }
       },
-      (error) => failListener("game", error),
+      (error: unknown) => failListener("game", error),
     );
     return () => {
       active = false;
       stopProfile();
       stopGame();
     };
-  }, [authTokenUid, listenerAttempt, uid]);
+  }, [authTokenUid, listenerAttempt, uid, useConvexBackend]);
 
   const eventId = gameDoc === undefined ? null : eventIdOf(gameDoc);
   const scope = useMemo(() => (uid && eventId ? scopeForCurrentUser({ eventId }) : null), [uid, eventId]);

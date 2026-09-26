@@ -1,6 +1,8 @@
 import { Platform } from "react-native";
 import { getAuth } from "@react-native-firebase/auth";
-import { doc, getDoc, getFirestore } from "@react-native-firebase/firestore";
+import { fetchProfileAndGame } from "../convex/listeners";
+import { convexConfigured } from "../convex/client";
+import { useFirebaseEmulators } from "../firebase/config";
 import { GoogleSignin } from "@react-native-google-signin/google-signin";
 import { getCallableReason, stopRemoteTracking, updateTelemetry, uploadLocationBatch } from "../firebase/callables";
 import { startLocationUpdates, stopLocationUpdates } from "../locationService";
@@ -69,8 +71,15 @@ export async function signOutSafely(): Promise<void> {
  * null documents is a definitive "profile/game missing" denial and stops tracking.
  */
 export const onBackgroundSamples = session.createBackgroundGate(sessionDeps, async (uid) => {
+  if (convexConfigured() && !useFirebaseEmulators) {
+    return fetchProfileAndGame(uid);
+  }
+  const { doc, getDoc, getFirestore } = await import("@react-native-firebase/firestore");
   const db = getFirestore();
-  const [profile, game] = await Promise.all([getDoc(doc(db, "users", uid)), getDoc(doc(db, "game", "state"))]);
+  const [profile, game] = await Promise.all([
+    getDoc(doc(db, "users", uid)),
+    getDoc(doc(db, "game", "state")),
+  ]);
   return {
     profile: snapshotData<ProfileSnapshot>(profile),
     game: snapshotData<GameSnapshot>(game),
