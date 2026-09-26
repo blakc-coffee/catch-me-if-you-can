@@ -14,7 +14,8 @@
     "seed": "tsx scripts/seed.ts",
     "grant-admin": "tsx scripts/grant-admin.ts",
     "migrate": "tsx scripts/migrate.ts",
-    "rotate-artifact": "tsx scripts/rotate-artifact.ts"
+    "rotate-artifact": "tsx scripts/rotate-artifact.ts",
+    "generate:qr": "tsx scripts/generateArtifactQr.ts"
   },
   "dependencies": {
     "firebase-admin": "^14.5.0",
@@ -25,6 +26,8 @@
     "@firebase/rules-unit-testing": "^5.0.2",
     "@types/node": "^22.19.0",
     "firebase": "^12.19.0",
+    "qrcode": "^1.5.4",
+    "@types/qrcode": "^1.5.5",
     "tsx": "^4.23.15",
     "typescript": "7.0.2",
     "vitest": "^5.0.1"

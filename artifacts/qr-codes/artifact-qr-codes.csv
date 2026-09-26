@@ -1,0 +1,18 @@
+key,name,qrType,puzzleId,qrCode
+a01,Artifact 01,correct,,OV-seed-a01-2142
+a02,Artifact 02,correct,,OV-seed-a02-2143
+a03,Artifact 03,correct,,OV-seed-a03-2144
+a04,Artifact 04,correct,,OV-seed-a04-2145
+a05,Artifact 05,correct,,OV-seed-a05-2146
+a06,Artifact 06,correct,,OV-seed-a06-2147
+a07,Artifact 07,correct,,OV-seed-a07-2148
+a08,Artifact 08,correct,,OV-seed-a08-2149
+a09,Artifact 09,correct,,OV-seed-a09-214a
+a10,Artifact 10,correct,,OV-seed-a10-214w
+a11,Artifact 11,correct,case-01,OV-seed-a11-214x
+a12,Artifact 12,correct,,OV-seed-a12-214y
+a13,Artifact 13,correct,,OV-seed-a13-214z
+a14,Artifact 14,correct,,OV-seed-a14-2150
+a15,Artifact 15,correct,,OV-seed-a15-2151
+d01,Decoy Key,wrong,,OV-seed-d01-23c5
+d02,Rusty Key,wrong,,OV-seed-d02-23c6

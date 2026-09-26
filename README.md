@@ -22,7 +22,7 @@ Campus-scale alternate reality gaming (ARG) / Capture The Flag (CTF) tactical op
 ```
 catch-me-if-you-can/
 ├── openverse-mobile/       # Mobile client application (React, Vite, Motion, Touch Gestures)
-├── openverse-web/          # Web surveillance & operational interface
+├── solvenseek/             # Web surveillance portal (submodule → github.com/tovi-govi/solvenseek, deployed at solvenseek.vercel.app)
 ├── backend/                # Firebase: Firestore rules/indexes, Cloud Functions, emulators (see backend/README.md)
 ├── project.md              # Detailed architecture, Firestore schemas & specifications
 ├── .gitignore              # Monorepo ignore rules
@@ -61,15 +61,19 @@ npm run build:apk
 
 Background tracking must be tested in a development or release build; Android background services are unavailable in Expo Go.
 
-### Web Command Portal (`openverse-web`)
+### Web Command Portal (`solvenseek`)
+
+Production: **https://solvenseek.vercel.app**
 
 ```bash
-cd openverse-web
+git submodule update --init solvenseek
+cd solvenseek
 npm install
+cp .env.example .env.local
 npm run dev
 ```
 
-The web command portal is scaffolded in `openverse-web`; its first implementation pass is still pending dependency installation.
+See [docs/solvenseek-integration.md](docs/solvenseek-integration.md) for Firebase env alignment with `openverse-native`.
 
 ---
 

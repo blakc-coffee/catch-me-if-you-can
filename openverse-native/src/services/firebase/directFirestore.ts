@@ -11,6 +11,7 @@ import {
   where,
   FieldValue,
 } from "@react-native-firebase/firestore";
+import { DEFAULT_EVENT_ID } from "./contract";
 import type {
   CreateOrSyncProfileRequest,
   CreateOrSyncProfileResponse,
@@ -82,9 +83,9 @@ export async function directCreateOrSyncProfile(
     await setDoc(
       gameRef,
       {
-        eventId: "cmiyc_event_1",
+        eventId: DEFAULT_EVENT_ID,
         status: "active",
-        telemetryMinIntervalSec: 5,
+        telemetryMinIntervalSec: 10,
         updatedAt: FieldValue.serverTimestamp(),
       },
       { merge: true }
@@ -555,9 +556,37 @@ export async function directGetMissionState(): Promise<GetMissionStateResponse> 
     console.warn("Could not load mission puzzles:", err);
   }
 
+  const gameSnap = await getDoc(doc(db, "game", "state")).catch(() => null);
+  const gameData = gameSnap?.exists() ? (gameSnap.data() as Record<string, unknown>) : null;
+  const eventId =
+    typeof gameData?.eventId === "string" && gameData.eventId.length > 0
+      ? gameData.eventId
+      : DEFAULT_EVENT_ID;
+  const gameStatus =
+    gameData?.status === "draft" ||
+    gameData?.status === "active" ||
+    gameData?.status === "paused" ||
+    gameData?.status === "ended"
+      ? gameData.status
+      : "active";
+
+  let totalArtifacts = 15;
+  try {
+    const artifactsSnap = await getDocs(
+      query(collection(db, "artifacts"), where("isActive", "==", true))
+    ).catch(() => null);
+    if (artifactsSnap) {
+      totalArtifacts = artifactsSnap.docs.filter(
+        (d) => (d.data() as Record<string, unknown>).qrType === "correct"
+      ).length;
+    }
+  } catch {
+    /* keep default */
+  }
+
   return {
-    eventId: "cmiyc_event_1",
-    gameStatus: "active",
+    eventId,
+    gameStatus,
     team: {
       teamId,
       name: teamName,
@@ -567,7 +596,7 @@ export async function directGetMissionState(): Promise<GetMissionStateResponse> 
       tokens: 0,
       puzzlesSolved: puzzles.filter((p) => p.solvedByYourTeam).length,
     },
-    totalArtifacts: 15,
+    totalArtifacts: totalArtifacts || 15,
     puzzles,
   };
 }

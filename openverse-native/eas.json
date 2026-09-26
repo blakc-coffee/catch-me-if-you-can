@@ -15,7 +15,8 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_USE_FIREBASE_EMULATORS": "false"
+        "EXPO_PUBLIC_USE_FIREBASE_EMULATORS": "false",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "${EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID}"
       }
     },
     "production": {
