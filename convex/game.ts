@@ -75,7 +75,7 @@ export const getMissionState = query({
           .unique();
         if (!pub || !pub.audience.includes("seeker")) continue;
 
-        const claim = await ctx.db
+        await ctx.db
           .query("puzzleClaims")
           .withIndex("by_puzzle", (q) => q.eq("puzzleExternalId", unlock.puzzleExternalId))
           .unique();

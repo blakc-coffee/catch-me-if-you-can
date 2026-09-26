@@ -18,13 +18,14 @@ export type ErrorReason =
   | "INTERNAL";
 
 export class ConvexAppError extends Error {
-  constructor(
-    message: string,
-    public readonly reason: ErrorReason,
-    public readonly retryAfterMs?: number,
-  ) {
+  readonly reason: ErrorReason;
+  readonly retryAfterMs?: number;
+
+  constructor(message: string, reason: ErrorReason, retryAfterMs?: number) {
     super(message);
     this.name = "ConvexAppError";
+    this.reason = reason;
+    this.retryAfterMs = retryAfterMs;
   }
 }
 

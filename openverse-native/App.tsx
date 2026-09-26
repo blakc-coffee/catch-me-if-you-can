@@ -18,7 +18,7 @@ import { applyClaim, initialGameState, listPuzzles, markSolved, mergeMissionPuzz
 import { summarizeMission, type MissionLoad } from "./src/services/session/missionView";
 import { sameScope } from "./src/services/session/scope";
 import { enforceAuthorization, handleAuthChange, scopeForCurrentUser, signOutSafely, syncLocationQueue } from "./src/services/session/sessionRuntime";
-import { snapshotData } from "./src/services/session/snapshotData";
+import { snapshotData, type SnapshotLike } from "./src/services/session/snapshotData";
 import { firestoreErrorCode, profileSyncFailure, scopeKeyOf, shouldRetryAccountListener, startupPhase, type ProfileSync } from "./src/services/session/startup";
 import { SessionChangedError, SessionGuard } from "./src/services/session/sessionGuard";
 import { evaluateTracking, eventIdOf, type GameSnapshot, type ProfileSnapshot } from "./src/services/session/trackingPolicy";
@@ -187,10 +187,10 @@ export default function App() {
     const db = getFirestore();
     const stopProfile = onSnapshot(
       doc(db, "users", uid),
-      (snap: Parameters<typeof snapshotData>[0]) => {
+      (snap: SnapshotLike<ProfileSnapshot>) => {
         if (!active) return;
         try {
-          setProfile(snapshotData<ProfileSnapshot>(snap));
+          setProfile(snapshotData(snap));
           setListenerFailures((current) => ({ ...current, profile: false }));
         } catch (error) {
           failListener("profile", error);
@@ -200,10 +200,10 @@ export default function App() {
     );
     const stopGame = onSnapshot(
       doc(db, "game", "state"),
-      (snap: Parameters<typeof snapshotData>[0]) => {
+      (snap: SnapshotLike<GameSnapshot>) => {
         if (!active) return;
         try {
-          setGameDoc(snapshotData<GameSnapshot>(snap));
+          setGameDoc(snapshotData(snap));
           setListenerFailures((current) => ({ ...current, game: false }));
         } catch (error) {
           failListener("game", error);

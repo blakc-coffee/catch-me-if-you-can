@@ -2,7 +2,6 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import {
   defaultTeamForEmail,
-  getCurrentUser,
   getCurrentUserOrNull,
   makePlayerId,
   requireIdentity,

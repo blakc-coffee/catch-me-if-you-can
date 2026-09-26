@@ -2,26 +2,35 @@ import { api } from "../../../../convex/_generated/api";
 import type { GameSnapshot, ProfileSnapshot } from "../session/trackingPolicy";
 import { getConvexClient } from "./client";
 
+function emitProfileUpdate(
+  watch: ReturnType<ReturnType<typeof getConvexClient>["watchQuery"]>,
+  onUpdate: (profile: ProfileSnapshot | null) => void,
+  onError?: (error: unknown) => void,
+): void {
+  try {
+    const result = watch.localQueryResult();
+    if (!result) {
+      onUpdate(null);
+      return;
+    }
+    onUpdate({
+      role: result.role,
+      status: result.status,
+      teamId: result.teamId,
+    });
+  } catch (error) {
+    onError?.(error);
+  }
+}
+
 export function subscribeToProfile(
   firebaseUid: string,
   onUpdate: (profile: ProfileSnapshot | null) => void,
   onError?: (error: unknown) => void,
 ): () => void {
   const client = getConvexClient();
-  return client.watchQuery(api.users.getProfileByFirebaseUid, { firebaseUid }).onUpdate(
-    (result) => {
-      if (!result) {
-        onUpdate(null);
-        return;
-      }
-      onUpdate({
-        role: result.role,
-        status: result.status,
-        teamId: result.teamId,
-      });
-    },
-    (error) => onError?.(error),
-  );
+  const watch = client.watchQuery(api.users.getProfileByFirebaseUid, { firebaseUid });
+  return watch.onUpdate(() => emitProfileUpdate(watch, onUpdate, onError));
 }
 
 export function subscribeToGameState(
@@ -29,15 +38,22 @@ export function subscribeToGameState(
   onError?: (error: unknown) => void,
 ): () => void {
   const client = getConvexClient();
-  return client.watchQuery(api.game.getGameState, {}).onUpdate(
-    (result) => {
+  const watch = client.watchQuery(api.game.getGameState, {});
+  return watch.onUpdate(() => {
+    try {
+      const result = watch.localQueryResult();
+      if (!result) {
+        onUpdate(null);
+        return;
+      }
       onUpdate({
         status: result.status,
         eventId: result.eventId,
       });
-    },
-    (error) => onError?.(error),
-  );
+    } catch (error) {
+      onError?.(error);
+    }
+  });
 }
 
 export async function fetchProfileAndGame(firebaseUid: string): Promise<{
